@@ -11,8 +11,6 @@ import { createContext } from "./context";
 function isPortAvailable(port: number): Promise<boolean> {
   return new Promise((resolve) => {
     const server = net.createServer();
-    const webDistPath = path.resolve(process.cwd(), "web-dist");
-app.use(express.static(webDistPath));
     server.listen(port, () => {
       server.close(() => resolve(true));
     });
