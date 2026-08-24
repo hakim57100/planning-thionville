@@ -30,6 +30,8 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
+  const webDistPath = path.resolve(process.cwd(), "web-dist");
+app.use(express.static(webDistPath));
 
   // CORS - reflète l'origine de la requête pour supporter les credentials
   app.use((req, res, next) => {
