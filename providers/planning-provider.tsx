@@ -15,12 +15,13 @@ type PlanningContextValue = {
   setWeekStart: (value: string) => void; changeWeek: (offset: number) => void; setDemoRole: (role: PlanningRole) => void; setShowOnlyMine: (value: boolean) => void;
   createShift: (input: ShiftInput) => Promise<void>; updateShift: (id: number, input: Partial<ShiftInput>) => Promise<void>; deleteShift: (id: number) => Promise<void>; createStaffMember: (input: StaffInput) => Promise<string | null>; regenerateStaffCode: (id: number) => Promise<string | null>; setStaffActive: (id: number, active: boolean) => Promise<void>; publishWeek: () => Promise<void>;
   createUnavailability: (input: UnavailabilityInput) => Promise<void>; deleteUnavailability: (id: number) => Promise<void>; signIn: () => Promise<void>;
+  user: ReturnType<typeof useAuth>["user"]; login: (code: string) => Promise<void>; logout: () => Promise<void>;
 };
 
 const PlanningContext = createContext<PlanningContextValue | null>(null);
 
 export function PlanningProvider({ children }: { children: ReactNode }) {
-  const router = useRouter(); const { isAuthenticated } = useAuth(); const initialWeek = toIsoDate(getMonday());
+  const router = useRouter(); const { isAuthenticated, user, loginWithCode, logout: authLogout } = useAuth(); const initialWeek = toIsoDate(getMonday());
   const [weekStart, setWeekStart] = useState(initialWeek); const [demoRole, setDemoRole] = useState<PlanningRole>("admin"); const [showOnlyMine, setShowOnlyMine] = useState(false); const [localWeeks, setLocalWeeks] = useState<Record<string, PlanningSnapshot>>({});
   const authQuery = trpc.auth.me.useQuery(undefined, { enabled: isAuthenticated }); const remoteQuery = trpc.planning.myWeek.useQuery({ weekStart }, { enabled: isAuthenticated });
   const createStaffMutation = trpc.planning.createStaffMember.useMutation(); const regenerateCodeMutation = trpc.planning.regenerateStaffCode.useMutation(); const setStaffActiveMutation = trpc.planning.setStaffActive.useMutation(); const createShiftMutation = trpc.planning.createShift.useMutation(); const updateShiftMutation = trpc.planning.updateShift.useMutation(); const deleteShiftMutation = trpc.planning.deleteShift.useMutation(); const publishWeekMutation = trpc.planning.publishWeek.useMutation();
@@ -43,7 +44,9 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const changeWeek = useCallback((offset: number) => { const [year, month, day] = weekStart.split("-").map(Number); setWeekStart(toIsoDate(new Date(year, month - 1, day + offset * 7))); }, [weekStart]);
   const switchDemoRole = useCallback((nextRole: PlanningRole) => { setDemoRole(nextRole); setShowOnlyMine(nextRole === "employee"); }, []);
   const signIn = useCallback(async () => { router.push("/login"); }, [router]);
-  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, updateShift, deleteShift, createStaffMember, regenerateStaffCode, setStaffActive, publishWeek, createUnavailability, deleteUnavailability, signIn }), [authQuery.isLoading, changeWeek, createShift, createStaffMember, regenerateStaffCode, setStaffActive, createUnavailability, deleteShift, deleteUnavailability, isAuthenticated, isDemo, personalMember, publishWeek, remoteQuery.isLoading, role, showOnlyMine, signIn, snapshot, switchDemoRole, updateShift, visibleShifts, weekStart]);
+  const login = useCallback(async (code: string) => { await loginWithCode(code); }, [loginWithCode]);
+  const logout = useCallback(async () => { await authLogout(); }, [authLogout]);
+  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, updateShift, deleteShift, createStaffMember, regenerateStaffCode, setStaffActive, publishWeek, createUnavailability, deleteUnavailability, signIn, user, login, logout }), [authQuery.isLoading, changeWeek, createShift, createStaffMember, regenerateStaffCode, setStaffActive, createUnavailability, deleteShift, deleteUnavailability, isAuthenticated, isDemo, login, logout, personalMember, publishWeek, remoteQuery.isLoading, role, showOnlyMine, signIn, snapshot, switchDemoRole, updateShift, user, visibleShifts, weekStart]);
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }
 

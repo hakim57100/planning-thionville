@@ -1,7 +1,7 @@
 import "dotenv/config";
 import express from "express";
-import path from "path";
 import { createServer } from "http";
+import net from "net";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAuthRoutes } from "./authRoutes";
 import { appRouter } from "../routers";
@@ -29,8 +29,6 @@ async function findAvailablePort(startPort: number = 3000): Promise<number> {
 async function startServer() {
   const app = express();
   const server = createServer(app);
-  const webDistPath = path.resolve(process.cwd(), "web-dist");
-app.use(express.static(webDistPath));
 
   // CORS - reflète l'origine de la requête pour supporter les credentials
   app.use((req, res, next) => {
@@ -69,11 +67,16 @@ app.use(express.static(webDistPath));
     }),
   );
 
-const port = parseInt(process.env.PORT || "3000", 10);
+  const preferredPort = parseInt(process.env.PORT || "3000");
+  const port = await findAvailablePort(preferredPort);
 
-server.listen(port, "0.0.0.0", () => {
-  console.log(`[api] server listening on port ${port}`);
-});
+  if (port !== preferredPort) {
+    console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
+  }
+
+  server.listen(port, () => {
+    console.log(`[api] server listening on port ${port}`);
+  });
 }
 
 startServer().catch(console.error);

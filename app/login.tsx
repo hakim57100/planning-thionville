@@ -1,13 +1,13 @@
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
+import { usePlanning } from "@/providers/planning-provider";
 import { useRouter } from "expo-router";
 import { useState } from "react";
 import { ActivityIndicator, Alert, Pressable, Text, TextInput, View } from "react-native";
 
 export default function Login() {
   const router = useRouter();
-  const { loginWithCode } = useAuth({ autoFetch: false });
+  const { login } = usePlanning();
   const [code, setCode] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
@@ -15,7 +15,7 @@ export default function Login() {
     if (!code.trim()) return;
     setSubmitting(true);
     try {
-      await loginWithCode(code);
+      await login(code);
       router.replace("/(tabs)");
     } catch (error) {
       Alert.alert(

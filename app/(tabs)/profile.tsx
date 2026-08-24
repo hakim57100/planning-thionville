@@ -1,14 +1,13 @@
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScreenContainer } from "@/components/screen-container";
-import { useAuth } from "@/hooks/use-auth";
 import { usePlanning } from "@/providers/planning-provider";
 import { useRouter } from "expo-router";
 import { Pressable, Text, View } from "react-native";
 
 export default function ProfileScreen() {
   const router = useRouter();
-  const { user, isAuthenticated, logout } = useAuth();
-  const { role, isDemo, setDemoRole } = usePlanning();
+  const { role, isDemo, setDemoRole, user, logout } = usePlanning();
+  const isAuthenticated = !isDemo;
 
   return (
     <ScreenContainer className="px-5">
