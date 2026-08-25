@@ -33,6 +33,7 @@ const MAPPING = {
   "briefcase.fill": "business-center",
   "bell.fill": "notifications",
   "square.and.arrow.up": "ios-share",
+  "arrow.down.doc": "upload-file",
   "chart.bar.fill": "bar-chart",
   "calendar.badge.exclamationmark": "event-busy",
   "xmark.circle.fill": "cancel",

@@ -8,12 +8,14 @@ import { createContext, useCallback, useContext, useMemo, useState, type ReactNo
 type ShiftInput = Omit<PlanningShift, "id">;
 type StaffInput = Omit<Staff, "id">;
 type UnavailabilityInput = { serviceDate: string; period: UnavailabilityPeriod; reason?: string };
+type ExcelImportInput = { filename: string; contentBase64: string };
+type ExcelImportResult = { weekStart: string; importedShiftCount: number; planningWeekId: number | null };
 
 type PlanningContextValue = {
   isDemo: boolean; role: PlanningRole; weekStart: string; snapshot: PlanningSnapshot; loading: boolean; isAdmin: boolean;
   showOnlyMine: boolean; personalMember: Staff | null; visibleShifts: PlanningShift[];
   setWeekStart: (value: string) => void; changeWeek: (offset: number) => void; setDemoRole: (role: PlanningRole) => void; setShowOnlyMine: (value: boolean) => void;
-  createShift: (input: ShiftInput) => Promise<void>; updateShift: (id: number, input: Partial<ShiftInput>) => Promise<void>; deleteShift: (id: number) => Promise<void>; createStaffMember: (input: StaffInput) => Promise<string | null>; regenerateStaffCode: (id: number) => Promise<string | null>; setStaffActive: (id: number, active: boolean) => Promise<void>; publishWeek: () => Promise<void>;
+  createShift: (input: ShiftInput) => Promise<void>; importPlanningExcel: (input: ExcelImportInput) => Promise<ExcelImportResult>; updateShift: (id: number, input: Partial<ShiftInput>) => Promise<void>; deleteShift: (id: number) => Promise<void>; createStaffMember: (input: StaffInput) => Promise<string | null>; regenerateStaffCode: (id: number) => Promise<string | null>; setStaffActive: (id: number, active: boolean) => Promise<void>; publishWeek: () => Promise<void>;
   createUnavailability: (input: UnavailabilityInput) => Promise<void>; deleteUnavailability: (id: number) => Promise<void>; signIn: () => Promise<void>;
   user: ReturnType<typeof useAuth>["user"]; login: (code: string) => Promise<void>; logout: () => Promise<void>;
 };
@@ -24,7 +26,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const router = useRouter(); const { isAuthenticated, user, loginWithCode, logout: authLogout } = useAuth(); const initialWeek = toIsoDate(getMonday());
   const [weekStart, setWeekStart] = useState(initialWeek); const [demoRole, setDemoRole] = useState<PlanningRole>("admin"); const [showOnlyMine, setShowOnlyMine] = useState(false); const [localWeeks, setLocalWeeks] = useState<Record<string, PlanningSnapshot>>({});
   const authQuery = trpc.auth.me.useQuery(undefined, { enabled: isAuthenticated }); const remoteQuery = trpc.planning.myWeek.useQuery({ weekStart }, { enabled: isAuthenticated });
-  const createStaffMutation = trpc.planning.createStaffMember.useMutation(); const regenerateCodeMutation = trpc.planning.regenerateStaffCode.useMutation(); const setStaffActiveMutation = trpc.planning.setStaffActive.useMutation(); const createShiftMutation = trpc.planning.createShift.useMutation(); const updateShiftMutation = trpc.planning.updateShift.useMutation(); const deleteShiftMutation = trpc.planning.deleteShift.useMutation(); const publishWeekMutation = trpc.planning.publishWeek.useMutation();
+  const createStaffMutation = trpc.planning.createStaffMember.useMutation(); const regenerateCodeMutation = trpc.planning.regenerateStaffCode.useMutation(); const setStaffActiveMutation = trpc.planning.setStaffActive.useMutation(); const createShiftMutation = trpc.planning.createShift.useMutation(); const importPlanningExcelMutation = trpc.planning.importPlanningExcel.useMutation(); const updateShiftMutation = trpc.planning.updateShift.useMutation(); const deleteShiftMutation = trpc.planning.deleteShift.useMutation(); const publishWeekMutation = trpc.planning.publishWeek.useMutation();
   const createUnavailabilityMutation = trpc.planning.createUnavailability.useMutation(); const deleteUnavailabilityMutation = trpc.planning.deleteUnavailability.useMutation();
   const isDemo = !isAuthenticated; const role: PlanningRole = isDemo ? demoRole : authQuery.data?.role === "admin" ? "admin" : "employee"; const fallback = localWeeks[weekStart] ?? buildDemoWeek(weekStart); const snapshot = (isAuthenticated ? remoteQuery.data : fallback) ?? fallback;
   const personalId = isDemo ? undefined : authQuery.data?.id;
@@ -33,6 +35,12 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const patchLocalWeek = useCallback((updater: (previous: PlanningSnapshot) => PlanningSnapshot) => setLocalWeeks((previous) => ({ ...previous, [weekStart]: updater(previous[weekStart] ?? buildDemoWeek(weekStart)) })), [weekStart]);
   const refetch = useCallback(async () => { if (isAuthenticated) await remoteQuery.refetch(); }, [isAuthenticated, remoteQuery]);
   const createShift = useCallback(async (input: ShiftInput) => { if (isDemo) { patchLocalWeek((previous) => ({ ...previous, shifts: [...previous.shifts, { ...input, id: -Date.now() }] })); return; } await createShiftMutation.mutateAsync({ ...input, note: input.note ?? undefined, weekStart }); await refetch(); }, [createShiftMutation, isDemo, patchLocalWeek, refetch, weekStart]);
+  const importPlanningExcel = useCallback(async (input: ExcelImportInput): Promise<ExcelImportResult> => {
+    if (isDemo) throw new Error("Connectez-vous avec un compte administrateur pour importer un planning.");
+    const result = await importPlanningExcelMutation.mutateAsync(input);
+    if (result.weekStart === weekStart) await refetch(); else setWeekStart(result.weekStart);
+    return result;
+  }, [importPlanningExcelMutation, isDemo, refetch, weekStart]);
   const updateShift = useCallback(async (id: number, input: Partial<ShiftInput>) => { if (isDemo) { patchLocalWeek((previous) => ({ ...previous, shifts: previous.shifts.map((shift) => shift.id === id ? { ...shift, ...input } : shift) })); return; } await updateShiftMutation.mutateAsync({ id, ...input }); await refetch(); }, [isDemo, patchLocalWeek, refetch, updateShiftMutation]);
   const deleteShift = useCallback(async (id: number) => { if (isDemo) { patchLocalWeek((previous) => ({ ...previous, shifts: previous.shifts.filter((shift) => shift.id !== id) })); return; } await deleteShiftMutation.mutateAsync({ id }); await refetch(); }, [deleteShiftMutation, isDemo, patchLocalWeek, refetch]);
   const createStaffMember = useCallback(async (input: StaffInput) => { if (isDemo) { patchLocalWeek((previous) => ({ ...previous, members: [...previous.members, { ...input, id: -Date.now() }] })); return null; } const result = await createStaffMutation.mutateAsync({ ...input, email: input.email ?? undefined }); await refetch(); return result.code; }, [createStaffMutation, isDemo, patchLocalWeek, refetch]);
@@ -46,7 +54,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => { router.push("/login"); }, [router]);
   const login = useCallback(async (code: string) => { await loginWithCode(code); }, [loginWithCode]);
   const logout = useCallback(async () => { await authLogout(); }, [authLogout]);
-  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, updateShift, deleteShift, createStaffMember, regenerateStaffCode, setStaffActive, publishWeek, createUnavailability, deleteUnavailability, signIn, user, login, logout }), [authQuery.isLoading, changeWeek, createShift, createStaffMember, regenerateStaffCode, setStaffActive, createUnavailability, deleteShift, deleteUnavailability, isAuthenticated, isDemo, login, logout, personalMember, publishWeek, remoteQuery.isLoading, role, showOnlyMine, signIn, snapshot, switchDemoRole, updateShift, user, visibleShifts, weekStart]);
+  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, importPlanningExcel, updateShift, deleteShift, createStaffMember, regenerateStaffCode, setStaffActive, publishWeek, createUnavailability, deleteUnavailability, signIn, user, login, logout }), [authQuery.isLoading, changeWeek, createShift, createStaffMember, regenerateStaffCode, setStaffActive, createUnavailability, deleteShift, deleteUnavailability, importPlanningExcel, isAuthenticated, isDemo, login, logout, personalMember, publishWeek, remoteQuery.isLoading, role, showOnlyMine, signIn, snapshot, switchDemoRole, updateShift, user, visibleShifts, weekStart]);
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }
 

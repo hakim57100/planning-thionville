@@ -52,8 +52,10 @@ async function startServer() {
     next();
   });
 
-  app.use(express.json({ limit: "5mb" }));
-  app.use(express.urlencoded({ limit: "5mb", extended: true }));
+  // Le fichier Excel est envoyé en base64 via la mutation tRPC : la charge JSON
+  // doit couvrir l’encodage d’un fichier brut limité à 5 Mo.
+  app.use(express.json({ limit: "8mb" }));
+  app.use(express.urlencoded({ limit: "8mb", extended: true }));
   // Servir l'application Web Expo
   const __filename = fileURLToPath(import.meta.url);
   const __dirname = path.dirname(__filename);

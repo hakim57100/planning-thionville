@@ -1,0 +1,23 @@
+IMPORT EXCEL — FICHIERS À COPIER
+
+1. Extrayez ce fichier ZIP dans un dossier temporaire.
+2. Ouvrez le dossier extrait : import_excel_files.
+3. Sélectionnez TOUT ce qu'il contient (app, components, providers, server, package.json et pnpm-lock.yaml).
+4. Copiez ces éléments dans la RACINE du dépôt cloné planning-thionville-git.
+5. Windows affichera des demandes de fusion/remplacement : choisissez « Remplacer les fichiers dans la destination ».
+
+Ne copiez PAS les fichiers dans web-dist, node_modules ou dist.
+
+Ensuite, dans CMD à la racine de planning-thionville-git, exécutez :
+
+npm install
+npm run check
+npm run build
+git status
+git add .
+git commit -m "feat: add Excel planning import"
+git push origin main
+
+Le script SQL 002_import_excel_schema_existant.sql doit déjà avoir été exécuté dans Supabase et les 16 alias doivent déjà être présents, comme dans les étapes précédentes.
+
+Dans l'application, connectez-vous avec un compte administrateur, ouvrez « Gérer le planning », appuyez sur « Importer Excel », puis choisissez planningsemaine34.xlsx.

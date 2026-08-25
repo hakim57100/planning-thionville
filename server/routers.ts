@@ -3,12 +3,17 @@ import { adminProcedure, protectedProcedure, publicProcedure, router } from "./_
 import { toPublicStaffMember } from "../drizzle/schema";
 import { generateAccessCode } from "./_core/codeAuth";
 import * as db from "./db";
+import { parsePlanningExcel } from "./planningExcel";
 
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const weekSchema = z.object({ weekStart: isoDateSchema });
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const shiftSchema = z.object({ weekStart: isoDateSchema, serviceDate: isoDateSchema, startsAt: timeSchema, endsAt: timeSchema, position: z.string().trim().min(2).max(120), note: z.string().trim().max(1000).optional(), memberIds: z.array(z.number().int().positive()).max(20) });
 const unavailabilitySchema = z.object({ serviceDate: isoDateSchema, period: z.enum(["all_day", "midi", "soir"]), reason: z.string().trim().max(255).optional() });
+const excelImportSchema = z.object({
+  filename: z.string().trim().regex(/^[^\\/]+\.xlsx$/i, "Le fichier doit être au format .xlsx.").max(180),
+  contentBase64: z.string().trim().min(1).max(7 * 1024 * 1024),
+});
 
 export const appRouter = router({
   system: router({
@@ -35,6 +40,14 @@ export const appRouter = router({
     }),
     setStaffActive: adminProcedure.input(z.object({ id: z.number().int().positive(), active: z.boolean() })).mutation(({ input }) => db.setStaffActive(input.id, input.active)),
     createShift: adminProcedure.input(shiftSchema).mutation(({ input }) => db.createShift(input)),
+    importPlanningExcel: adminProcedure.input(excelImportSchema).mutation(async ({ input }) => {
+      const file = Buffer.from(input.contentBase64, "base64");
+      if (!file.length || file.length > 5 * 1024 * 1024) {
+        throw new Error("Le fichier Excel est vide ou dépasse la limite de 5 Mo.");
+      }
+      const planning = parsePlanningExcel(file);
+      return db.importPlanningExcel({ sourceFilename: input.filename, planning });
+    }),
     updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
     publishWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.publishWeek(input.weekStart)),

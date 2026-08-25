@@ -1,7 +1,8 @@
-import { and, asc, eq, gte, inArray, lte } from "drizzle-orm";
+import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
 import { InsertStaffMember, planningWeeks, shifts, shiftAssignments, staffMembers, staffUnavailability, StaffMember } from "../drizzle/schema";
 import { hashAccessCode } from "./_core/codeAuth";
+import type { ParsedExcelPlanning } from "./planningExcel";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -68,6 +69,56 @@ export async function ensureWeek(weekStart: string) {
 }
 
 // Crée un salarié et génère son code d'accès en clair (affiché une seule fois à l'admin).
+export type ExcelImportResult = { weekStart: string; importedShiftCount: number; planningWeekId: number | null };
+
+/**
+ * Vérifie les alias déjà validés dans Supabase, puis délègue le remplacement
+ * atomique de la semaine à la fonction SQL replace_excel_planning_week.
+ */
+export async function importPlanningExcel(input: { sourceFilename: string; planning: ParsedExcelPlanning }): Promise<ExcelImportResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  const aliasesToFind = [...new Set(input.planning.shifts.map((shift) => shift.normalizedEmployeeName))];
+  const aliasList = sql.join(aliasesToFind.map((alias) => sql`${alias}`), sql`, `);
+  const aliasResult = await database.execute(sql`
+    select alias_normalized, "staffMemberId"
+    from public.staff_import_aliases
+    where alias_normalized in (${aliasList})
+  `);
+  const aliases = aliasResult.rows as Array<{ alias_normalized: string; staffMemberId: number }>;
+  const staffIdByAlias = new Map(aliases.map((entry) => [entry.alias_normalized, entry.staffMemberId]));
+  const missingAliases = aliasesToFind.filter((alias) => !staffIdByAlias.has(alias));
+
+  if (missingAliases.length) {
+    throw new Error(`Employés non rapprochés : ${missingAliases.join(", ")}. Ajoutez leurs alias avant de relancer l’import.`);
+  }
+
+  const shifts = input.planning.shifts.map((shift) => ({
+    source_employee_alias: shift.normalizedEmployeeName,
+    staff_member_id: staffIdByAlias.get(shift.normalizedEmployeeName),
+    service_date: shift.serviceDate,
+    starts_at: shift.startsAt,
+    ends_at: shift.endsAt,
+    position: shift.position,
+  }));
+
+  const result = await database.execute(sql`
+    select public.replace_excel_planning_week(
+      ${input.planning.weekStart},
+      ${JSON.stringify(shifts)}::jsonb,
+      ${input.sourceFilename}
+    ) as result
+  `);
+  const response = result.rows[0] as { result?: { planningWeekId?: number } } | undefined;
+
+  return {
+    weekStart: input.planning.weekStart,
+    importedShiftCount: shifts.length,
+    planningWeekId: response?.result?.planningWeekId ?? null,
+  };
+}
+
 export async function createStaffMember(input: { name: string; email?: string; jobTitle: string; color: string; role?: "admin" | "employee" }, plainCode: string) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
   const codeHash = hashAccessCode(plainCode);
