@@ -2,6 +2,8 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import path from "path";
+import { fileURLToPath } from "url";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAuthRoutes } from "./authRoutes";
 import { appRouter } from "../routers";
@@ -52,6 +54,13 @@ async function startServer() {
 
   app.use(express.json({ limit: "5mb" }));
   app.use(express.urlencoded({ limit: "5mb", extended: true }));
+  // Servir l'application Web Expo
+  const __filename = fileURLToPath(import.meta.url);
+  const __dirname = path.dirname(__filename);
+
+  const webDistPath = path.resolve(__dirname, "../../web-dist");
+
+  app.use(express.static(webDistPath));
 
   registerAuthRoutes(app);
 
@@ -73,6 +82,14 @@ async function startServer() {
   if (port !== preferredPort) {
     console.log(`Port ${preferredPort} is busy, using port ${port} instead`);
   }
+  app.get("*", (req, res) => {
+    if (req.path.startsWith("/api/")) {
+      res.status(404).json({ error: "API route not found" });
+      return;
+    }
+
+    res.sendFile(path.join(webDistPath, "index.html"));
+  });
 
   server.listen(port, () => {
     console.log(`[api] server listening on port ${port}`);
