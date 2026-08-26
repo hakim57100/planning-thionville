@@ -63,6 +63,12 @@ export const appRouter = router({
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
     duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
     publishWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.publishWeek(input.weekStart)),
+    notifications: protectedProcedure.query(({ ctx }) =>
+      ctx.user.role === "employee" ? db.getStaffNotifications(ctx.user.id) : [],
+    ),
+    markNotificationRead: protectedProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ ctx, input }) => db.markStaffNotificationRead(ctx.user.id, input.id)),
     createUnavailability: protectedProcedure.input(unavailabilitySchema).mutation(({ ctx, input }) => db.createUnavailabilityForMember(ctx.user.id, input)),
     deleteUnavailability: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ ctx, input }) => db.deleteUnavailabilityForMember(ctx.user.id, input.id)),
   }),
