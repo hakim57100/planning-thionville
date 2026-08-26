@@ -3,7 +3,6 @@ import express from "express";
 import { createServer } from "http";
 import net from "net";
 import path from "path";
-import { fileURLToPath } from "url";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAuthRoutes } from "./authRoutes";
 import { appRouter } from "../routers";
@@ -56,14 +55,9 @@ async function startServer() {
   // doit couvrir l’encodage d’un fichier brut limité à 5 Mo.
   app.use(express.json({ limit: "8mb" }));
   app.use(express.urlencoded({ limit: "8mb", extended: true }));
-  // Servir l'application Web Expo
-  const __filename = fileURLToPath(import.meta.url);
-  const __dirname = path.dirname(__filename);
-
-  const webDistPath = path.resolve(__dirname, "../../web-dist");
-
-  app.use(express.static(webDistPath));
-
+   // Le build Expo génère web-dist à la racine du projet Render.
+  const webDistPath = path.resolve(process.cwd(), "web-dist");
+ 
   registerAuthRoutes(app);
 
   app.get("/api/health", (_req, res) => {
