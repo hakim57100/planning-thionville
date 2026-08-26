@@ -38,6 +38,21 @@ export const planningWeeks = pgTable("planning_weeks", {
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
 });
 
+// Alerte personnelle affichée dans l’application. Une alerte est créée pour
+// chaque salarié actif à la publication d’un planning et reste visible jusqu’à
+// sa consultation.
+export const staffNotifications = pgTable("staff_notifications", {
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  staffMemberId: integer("staffMemberId").notNull(),
+  planningWeekId: integer("planningWeekId").notNull(),
+  weekStart: varchar("weekStart", { length: 10 }).notNull(),
+  type: varchar("type", { length: 40 }).notNull().default("planning_published"),
+  title: varchar("title", { length: 160 }).notNull(),
+  message: text("message").notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  readAt: timestamp("readAt"),
+});
+
 export const shifts = pgTable("shifts", {
   id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   planningWeekId: integer("planningWeekId").notNull(),
@@ -62,6 +77,7 @@ export type InsertStaffMember = typeof staffMembers.$inferInsert;
 export type StaffUnavailability = typeof staffUnavailability.$inferSelect;
 export type Shift = typeof shifts.$inferSelect;
 export type PlanningWeek = typeof planningWeeks.$inferSelect;
+export type StaffNotification = typeof staffNotifications.$inferSelect;
 
 // Vue "publique" d'un salarié : jamais le codeHash.
 export type PublicStaffMember = Omit<StaffMember, "codeHash">;
