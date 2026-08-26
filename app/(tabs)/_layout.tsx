@@ -9,7 +9,7 @@ import { usePlanning } from "@/providers/planning-provider";
 export default function TabLayout() {
   const colors = useColors();
   const insets = useSafeAreaInsets();
-  const { isAdmin } = usePlanning();
+  const { isAdmin, unreadNotificationCount } = usePlanning();
   const bottomPadding = Platform.OS === "web" ? 12 : Math.max(insets.bottom, 8);
   const tabBarHeight = 56 + bottomPadding;
   return (
@@ -22,7 +22,14 @@ export default function TabLayout() {
       tabBarLabelStyle: { fontSize: 11, fontWeight: "600" },
     }}>
       <Tabs.Screen name="index" options={{ title: "Accueil", tabBarIcon: ({ color }) => <IconSymbol size={25} name="house.fill" color={color} /> }} />
-      <Tabs.Screen name="planning" options={{ title: "Planning", tabBarIcon: ({ color }) => <IconSymbol size={25} name="calendar" color={color} /> }} />
+      <Tabs.Screen
+        name="planning"
+        options={{
+          title: "Planning",
+          tabBarBadge: unreadNotificationCount > 0 ? (unreadNotificationCount > 9 ? "9+" : unreadNotificationCount) : undefined,
+          tabBarIcon: ({ color }) => <IconSymbol size={25} name="calendar" color={color} />,
+        }}
+      />
       <Tabs.Screen name="team" options={{ title: "Équipe", tabBarIcon: ({ color }) => <IconSymbol size={25} name="person.2.fill" color={color} /> }} />
       <Tabs.Screen name="manage" options={{ title: "Gérer", href: isAdmin ? undefined : null, tabBarIcon: ({ color }) => <IconSymbol size={25} name="slider.horizontal.3" color={color} /> }} />
       <Tabs.Screen name="profile" options={{ title: "Profil", tabBarIcon: ({ color }) => <IconSymbol size={25} name="person.crop.circle" color={color} /> }} />
