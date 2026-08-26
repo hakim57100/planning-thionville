@@ -2,7 +2,9 @@ import "dotenv/config";
 import express from "express";
 import { createServer } from "http";
 import net from "net";
+import { existsSync } from "fs";
 import path from "path";
+import { fileURLToPath } from "url";
 import { createExpressMiddleware } from "@trpc/server/adapters/express";
 import { registerAuthRoutes } from "./authRoutes";
 import { appRouter } from "../routers";
@@ -55,9 +57,20 @@ async function startServer() {
   // doit couvrir l’encodage d’un fichier brut limité à 5 Mo.
   app.use(express.json({ limit: "8mb" }));
   app.use(express.urlencoded({ limit: "8mb", extended: true }));
-   // Le build Expo génère web-dist à la racine du projet Render.
-  const webDistPath = path.resolve(process.cwd(), "web-dist");
- 
+
+  // Render peut démarrer le serveur depuis la racine du dépôt ou depuis dist.
+  // On cherche donc le dossier Expo exporté dans les emplacements possibles.
+  const bundledDirectory = path.dirname(fileURLToPath(import.meta.url));
+  const webDistCandidates = [
+    path.resolve(process.cwd(), "web-dist"),
+    path.resolve(bundledDirectory, "../web-dist"),
+    path.resolve(bundledDirectory, "../../web-dist"),
+  ];
+  const webDistPath =
+    webDistCandidates.find((candidate) => existsSync(candidate)) ??
+    webDistCandidates[0];
+
+  app.use(express.static(webDistPath));
   registerAuthRoutes(app);
 
   app.get("/api/health", (_req, res) => {
