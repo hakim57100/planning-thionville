@@ -42,11 +42,18 @@ export default function ProfileScreen() {
           {role === "employee" && <AvailabilityButton onPress={() => router.push("/unavailability")} />}
           <Pressable
             onPress={() => router.push("/login")}
-            style={({ pressed }) => ({ opacity: pressed ? 0.8 : 1 })}
-            className="mt-3 rounded-2xl bg-primary py-4 flex-row justify-center items-center gap-2"
+            accessibilityRole="button"
+            style={({ pressed }) => ({
+              opacity: pressed ? 0.82 : 1,
+              backgroundColor: "#B1122D",
+              borderColor: "#8E0E24",
+              borderWidth: 1,
+              minHeight: 56,
+            })}
+            className="mt-3 rounded-2xl flex-row justify-center items-center gap-2"
           >
             <IconSymbol name="lock.fill" size={19} color="#FFFFFF" />
-            <Text className="text-base font-bold text-white">Se connecter</Text>
+            <Text style={{ color: "#FFFFFF" }} className="text-base font-bold">Se connecter</Text>
           </Pressable>
         </View>
       ) : (
