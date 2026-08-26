@@ -10,6 +10,13 @@ const weekSchema = z.object({ weekStart: isoDateSchema });
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
 const shiftSchema = z.object({ weekStart: isoDateSchema, serviceDate: isoDateSchema, startsAt: timeSchema, endsAt: timeSchema, position: z.string().trim().min(2).max(120), note: z.string().trim().max(1000).optional(), memberIds: z.array(z.number().int().positive()).max(20) });
 const unavailabilitySchema = z.object({ serviceDate: isoDateSchema, period: z.enum(["all_day", "midi", "soir"]), reason: z.string().trim().max(255).optional() });
+const staffMemberSchema = z.object({
+  name: z.string().trim().min(2).max(120),
+  email: z.string().email().optional(),
+  jobTitle: z.string().trim().min(2).max(120),
+  color: z.string().regex(/^#[0-9A-Fa-f]{6}$/),
+  role: z.enum(["admin", "employee"]).optional(),
+});
 const excelImportSchema = z.object({
   filename: z.string().trim().regex(/^[^\\/]+\.xlsx$/i, "Le fichier doit être au format .xlsx.").max(180),
   contentBase64: z.string().trim().min(1).max(7 * 1024 * 1024),
@@ -27,10 +34,14 @@ export const appRouter = router({
     myWeek: protectedProcedure.input(weekSchema).query(({ ctx, input }) => ctx.user.role === "admin" ? db.getWeekSnapshot(input.weekStart) : db.getEmployeeWeek(ctx.user.id, input.weekStart)),
     fullWeek: adminProcedure.input(weekSchema).query(({ input }) => db.getWeekSnapshot(input.weekStart)),
     // Crée un salarié et renvoie son code d'accès en clair (à transmettre à la main, une seule fois).
-    createStaffMember: adminProcedure.input(z.object({ name: z.string().trim().min(2).max(120), email: z.string().email().optional(), jobTitle: z.string().trim().min(2).max(120), color: z.string().regex(/^#[0-9A-Fa-f]{6}$/), role: z.enum(["admin", "employee"]).optional() })).mutation(async ({ input }) => {
+    createStaffMember: adminProcedure.input(staffMemberSchema).mutation(async ({ input }) => {
       const code = generateAccessCode();
       const id = await db.createStaffMember(input, code);
       return { id, code };
+    }),
+    updateStaffMember: adminProcedure.input(staffMemberSchema.extend({ id: z.number().int().positive() })).mutation(({ input }) => {
+      const { id, ...changes } = input;
+      return db.updateStaffMember(id, changes);
     }),
     // Régénère le code d'un salarié (ex: code oublié/compromis) et le renvoie en clair.
     regenerateStaffCode: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(async ({ input }) => {
@@ -50,6 +61,7 @@ export const appRouter = router({
     }),
     updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
+    duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
     publishWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.publishWeek(input.weekStart)),
     createUnavailability: protectedProcedure.input(unavailabilitySchema).mutation(({ ctx, input }) => db.createUnavailabilityForMember(ctx.user.id, input)),
     deleteUnavailability: protectedProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ ctx, input }) => db.deleteUnavailabilityForMember(ctx.user.id, input.id)),

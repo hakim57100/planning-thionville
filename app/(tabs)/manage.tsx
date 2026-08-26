@@ -9,12 +9,53 @@ import { Alert, FlatList, Pressable, Text, View } from "react-native";
 
 export default function ManageScreen() {
   const router = useRouter();
-  const { snapshot, isAdmin, publishWeek, isDemo } = usePlanning();
-  const publish = () => Alert.alert("Publier le planning ?", "Les salariés pourront consulter cette semaine dès sa publication.", [{ text: "Annuler", style: "cancel" }, { text: "Publier", onPress: async () => { await publishWeek(); haptic.success(); } }]);
+  const { snapshot, isAdmin, publishWeek, duplicateWeekToNext, isDemo } = usePlanning();
+
+  const publish = () => Alert.alert("Publier le planning ?", "Les salariés pourront consulter cette semaine dès sa publication.", [
+    { text: "Annuler", style: "cancel" },
+    { text: "Publier", onPress: async () => { await publishWeek(); haptic.success(); } },
+  ]);
+
+  const duplicate = () => {
+    if (!snapshot.shifts.length) {
+      Alert.alert("Aucun service à dupliquer", "Ajoutez au moins un service à cette semaine avant de la copier.");
+      return;
+    }
+    Alert.alert(
+      "Dupliquer sur la semaine suivante ?",
+      "Les services, leurs horaires et les salariés affectés seront copiés à J+7. La nouvelle semaine restera en brouillon. Une semaine déjà remplie ne sera jamais écrasée.",
+      [
+        { text: "Annuler", style: "cancel" },
+        { text: "Dupliquer", onPress: async () => {
+          try {
+            const result = await duplicateWeekToNext();
+            haptic.success();
+            Alert.alert("Planning dupliqué", `${result.copiedShiftCount} service${result.copiedShiftCount > 1 ? "s" : ""} ont été copiés pour la semaine du ${result.weekStart}.`);
+          } catch (error) {
+            Alert.alert("Duplication impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
+          }
+        } },
+      ],
+    );
+  };
+
   if (!isAdmin) return <ScreenContainer className="items-center justify-center px-8"><IconSymbol name="lock.fill" size={34} color="#687076" /><Text className="mt-4 text-xl font-bold text-foreground">Accès administrateur requis</Text><Text className="mt-2 text-center text-muted">Cet espace est réservé à la création et à la publication des plannings.</Text></ScreenContainer>;
-  return <ScreenContainer><FlatList data={snapshot.shifts} keyExtractor={(shift) => String(shift.id)} contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: 12 }} ListHeaderComponent={<View className="gap-5 mb-5"><View className="flex-row justify-between items-start"><View className="flex-1 pr-3"><Text className="text-sm font-semibold uppercase tracking-widest text-primary">Administration</Text><Text className="mt-1 text-3xl font-bold text-foreground">Gérer le planning</Text><Text className="mt-1 text-base text-muted">Créez les créneaux et affectez l’équipe.</Text></View><StatusPill /></View><WeekNavigator />{isDemo && <Text className="text-xs leading-4 text-muted">Les modifications réalisées dans l’aperçu restent visibles sur cet appareil. Connectez-vous pour synchroniser le planning avec votre équipe.</Text>}<View className="flex-row gap-3"><AdminButton label="Ajouter un service" icon="plus" onPress={() => router.push("/shift-editor")} /><AdminButton label="Ajouter un salarié" icon="person.2.fill" onPress={() => router.push("/staff-editor")} /></View><View className="flex-row gap-3"><PlanningExcelImportButton /><PlanningExportButton shifts={snapshot.shifts} compact /></View><Pressable onPress={() => router.push("/dashboard")} style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1 })} className="rounded-2xl bg-foreground px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-primary items-center justify-center"><IconSymbol name="chart.bar.fill" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-white">Tableau de bord des heures</Text><Text className="mt-1 text-xs text-white/70">Consultez le total hebdomadaire par salarié.</Text></View><IconSymbol name="chevron.right" size={20} color="#FFFFFF" /></Pressable></View>} renderItem={({ item }) => <ShiftCard shift={item} onPress={() => router.push({ pathname: "/shift-editor", params: { id: String(item.id) } })} />} ListEmptyComponent={<View className="rounded-3xl bg-surface p-6 items-center"><IconSymbol name="calendar" size={30} color="#60788A" /><Text className="mt-3 text-center font-semibold text-foreground">Aucun service cette semaine</Text><Text className="mt-1 text-center text-sm text-muted">Ajoutez un premier créneau pour démarrer.</Text></View>} ListFooterComponent={<Pressable onPress={publish} style={({ pressed }) => ({ opacity: pressed ? 0.78 : 1 })} className="mt-5 rounded-2xl bg-primary py-4 flex-row justify-center items-center gap-2"><IconSymbol name="checkmark.circle.fill" size={20} color="#FFFFFF" /><Text className="text-base font-bold text-white">{snapshot.week?.status === "published" ? "Mettre à jour la publication" : "Publier la semaine"}</Text></Pressable>} /></ScreenContainer>;
+
+  return (
+    <ScreenContainer>
+      <FlatList
+        data={snapshot.shifts}
+        keyExtractor={(shift) => String(shift.id)}
+        contentContainerStyle={{ padding: 20, paddingBottom: 30, gap: 12 }}
+        ListHeaderComponent={<View className="gap-5 mb-5"><View className="flex-row justify-between items-start"><View className="flex-1 pr-3"><Text className="text-sm font-semibold uppercase tracking-widest text-primary">Administration</Text><Text className="mt-1 text-3xl font-bold text-foreground">Gérer le planning</Text><Text className="mt-1 text-base text-muted">Créez les créneaux et affectez l’équipe.</Text></View><StatusPill /></View><WeekNavigator />{isDemo && <Text className="text-xs leading-4 text-muted">Les modifications réalisées dans l’aperçu restent visibles sur cet appareil. Connectez-vous pour synchroniser le planning avec votre équipe.</Text>}<View className="flex-row gap-3"><AdminButton label="Ajouter un service" icon="plus" onPress={() => router.push("/shift-editor")} /><AdminButton label="Ajouter un salarié" icon="person.2.fill" onPress={() => router.push("/staff-editor")} /></View><View className="flex-row gap-3"><PlanningExcelImportButton /><PlanningExportButton shifts={snapshot.shifts} compact /></View><Pressable onPress={duplicate} accessibilityRole="button" accessibilityLabel="Dupliquer le planning sur la semaine suivante" style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><View className="rounded-2xl bg-[#E4F1FB] border border-[#B9D9ED] px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-primary items-center justify-center"><IconSymbol name="calendar" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-foreground">Dupliquer la semaine suivante</Text><Text className="mt-1 text-xs leading-4 text-muted">Copie les services et les affectations à J+7, en brouillon.</Text></View><IconSymbol name="chevron.right" size={20} color="#006491" /></View></Pressable><Pressable onPress={() => router.push("/dashboard")} style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1 })}><View className="rounded-2xl bg-foreground px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-primary items-center justify-center"><IconSymbol name="chart.bar.fill" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-white">Tableau de bord des heures</Text><Text className="mt-1 text-xs text-white/70">Consultez le total hebdomadaire par salarié.</Text></View><IconSymbol name="chevron.right" size={20} color="#FFFFFF" /></View></Pressable></View>}
+        renderItem={({ item }) => <ShiftCard shift={item} onPress={() => router.push({ pathname: "/shift-editor", params: { id: String(item.id) } })} />}
+        ListEmptyComponent={<View className="rounded-3xl bg-surface p-6 items-center"><IconSymbol name="calendar" size={30} color="#60788A" /><Text className="mt-3 text-center font-semibold text-foreground">Aucun service cette semaine</Text><Text className="mt-1 text-center text-sm text-muted">Ajoutez un premier créneau pour démarrer.</Text></View>}
+        ListFooterComponent={<Pressable onPress={publish} style={({ pressed }) => ({ opacity: pressed ? 0.78 : 1 })}><View className="mt-5 rounded-2xl bg-primary py-4 flex-row justify-center items-center gap-2"><IconSymbol name="checkmark.circle.fill" size={20} color="#FFFFFF" /><Text className="text-base font-bold text-white">{snapshot.week?.status === "published" ? "Mettre à jour la publication" : "Publier la semaine"}</Text></View></Pressable>}
+      />
+    </ScreenContainer>
+  );
 }
 
 function AdminButton({ label, icon, onPress }: { label: string; icon: "plus" | "person.2.fill"; onPress: () => void }) {
-  return <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.7 : 1 })} className="flex-1 rounded-2xl bg-surface border border-border px-3 py-3"><IconSymbol name={icon} size={20} color="#C96442" /><Text className="mt-2 text-sm font-bold text-foreground">{label}</Text></Pressable>;
+  return <Pressable onPress={onPress} accessibilityRole="button" style={({ pressed }) => ({ flex: 1, opacity: pressed ? 0.7 : 1 })}><View className="rounded-2xl bg-surface border border-border px-3 py-3"><IconSymbol name={icon} size={20} color="#C96442" /><Text className="mt-2 text-sm font-bold text-foreground">{label}</Text></View></Pressable>;
 }

@@ -38,6 +38,13 @@ function weekEnd(weekStart: string) {
   return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
 }
 
+function addDaysToIsoDate(isoDate: string, days: number) {
+  const [year, month, day] = isoDate.split("-").map(Number);
+  const date = new Date(Date.UTC(year, month - 1, day));
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
 function toPublicMember(member: StaffMember) {
   return { id: member.id, name: member.name, email: member.email, jobTitle: member.jobTitle, color: member.color, role: member.role, active: member.active };
 }
@@ -127,6 +134,20 @@ export async function createStaffMember(input: { name: string; email?: string; j
   return created.id;
 }
 
+export async function updateStaffMember(id: number, input: { name: string; email?: string; jobTitle: string; color: string; role?: "admin" | "employee" }) {
+  const database = await getDb(); if (!database) throw new Error("Database not available");
+  const [updated] = await database.update(staffMembers).set({
+    name: input.name,
+    email: input.email || null,
+    jobTitle: input.jobTitle,
+    color: input.color,
+    role: input.role ?? "employee",
+    updatedAt: new Date(),
+  }).where(eq(staffMembers.id, id)).returning();
+  if (!updated) throw new Error("Salarié introuvable");
+  return toPublicMember(updated);
+}
+
 // Régénère le code d'un salarié existant (retourne le nouveau code en clair).
 export async function regenerateStaffCode(id: number, plainCode: string) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
@@ -158,6 +179,51 @@ export async function updateShift(input: { id: number; serviceDate?: string; sta
 export async function deleteShift(id: number) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
   await database.delete(shiftAssignments).where(eq(shiftAssignments.shiftId, id)); await database.delete(shifts).where(eq(shifts.id, id));
+}
+
+export type DuplicateWeekResult = { sourceWeekStart: string; weekStart: string; copiedShiftCount: number };
+
+/**
+ * Copie les services et leurs affectations à J+7. La cible reste en brouillon
+ * et la duplication est refusée si elle contient déjà un service, afin de ne
+ * jamais écraser un planning saisi à la main.
+ */
+export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateWeekResult> {
+  const database = await getDb(); if (!database) throw new Error("Database not available");
+  const sourceWeek = (await database.select().from(planningWeeks).where(eq(planningWeeks.weekStart, weekStart)).limit(1))[0];
+  if (!sourceWeek) throw new Error("Le planning de cette semaine est introuvable.");
+
+  const targetWeekStart = addDaysToIsoDate(weekStart, 7);
+  return database.transaction(async (tx) => {
+    const sourceShifts = await tx.select().from(shifts).where(eq(shifts.planningWeekId, sourceWeek.id)).orderBy(asc(shifts.serviceDate), asc(shifts.startsAt));
+    if (!sourceShifts.length) throw new Error("Aucun service à dupliquer pour cette semaine.");
+
+    const existingTarget = (await tx.select().from(planningWeeks).where(eq(planningWeeks.weekStart, targetWeekStart)).limit(1))[0];
+    if (existingTarget) {
+      const existingShifts = await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.planningWeekId, existingTarget.id)).limit(1);
+      if (existingShifts.length) throw new Error(`La semaine du ${targetWeekStart} contient déjà des services. Elle n’a pas été modifiée.`);
+    }
+    const targetWeek = existingTarget ?? (await tx.insert(planningWeeks).values({ weekStart: targetWeekStart, status: "draft" }).returning())[0];
+    if (!targetWeek) throw new Error("Impossible de créer la semaine cible.");
+
+    const sourceShiftIds = sourceShifts.map((shift) => shift.id);
+    const assignments = sourceShiftIds.length ? await tx.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, sourceShiftIds)) : [];
+    for (const sourceShift of sourceShifts) {
+      const [copiedShift] = await tx.insert(shifts).values({
+        planningWeekId: targetWeek.id,
+        serviceDate: addDaysToIsoDate(sourceShift.serviceDate, 7),
+        startsAt: sourceShift.startsAt,
+        endsAt: sourceShift.endsAt,
+        position: sourceShift.position,
+        note: sourceShift.note,
+      }).returning();
+      if (!copiedShift) throw new Error("Impossible de copier un service.");
+      const memberIds = assignments.filter((assignment) => assignment.shiftId === sourceShift.id).map((assignment) => assignment.staffMemberId);
+      if (memberIds.length) await tx.insert(shiftAssignments).values(memberIds.map((staffMemberId) => ({ shiftId: copiedShift.id, staffMemberId })));
+    }
+
+    return { sourceWeekStart: weekStart, weekStart: targetWeekStart, copiedShiftCount: sourceShifts.length };
+  });
 }
 
 export async function publishWeek(weekStart: string) {

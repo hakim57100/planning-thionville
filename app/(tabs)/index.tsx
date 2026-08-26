@@ -53,11 +53,13 @@ export default function HomeScreen() {
             </View>
             {upcoming ? <ShiftCard shift={upcoming} /> : <EmptyState text="Aucun service prévu sur cette semaine." />}
 
-            <View className="rounded-3xl bg-surface border border-border px-5 py-4 flex-row items-center gap-4">
-              <View className="h-11 w-11 rounded-2xl bg-[#F4E6DE] items-center justify-center"><IconSymbol name="person.2.fill" size={21} color="#C96442" /></View>
-              <View className="flex-1"><Text className="font-bold text-foreground">{snapshot.members.length} membres dans l’équipe</Text><Text className="mt-1 text-sm text-muted">Tous les services sont centralisés ici.</Text></View>
-              <IconSymbol name="chevron.right" size={20} color="#687076" />
-            </View>
+            <Pressable onPress={() => router.push(role === "admin" ? "/(tabs)/manage" : "/(tabs)/planning")} accessibilityRole="button" accessibilityLabel="Accéder aux services de la semaine" style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>
+              <View className="rounded-3xl bg-surface border border-border px-5 py-4 flex-row items-center gap-4">
+                <View className="h-11 w-11 rounded-2xl bg-[#F4E6DE] items-center justify-center"><IconSymbol name="person.2.fill" size={21} color="#C96442" /></View>
+                <View className="flex-1"><Text className="font-bold text-foreground">{snapshot.members.length} membres dans l’équipe</Text><Text className="mt-1 text-sm text-muted">Tous les services sont centralisés ici.</Text></View>
+                <IconSymbol name="chevron.right" size={20} color="#687076" />
+              </View>
+            </Pressable>
           </View>
         )}
       />
