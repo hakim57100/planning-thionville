@@ -1,6 +1,6 @@
-import { and, asc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { InsertStaffMember, planningWeeks, shifts, shiftAssignments, staffMembers, staffUnavailability, StaffMember } from "../drizzle/schema";
+import { InsertStaffMember, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
 import { hashAccessCode } from "./_core/codeAuth";
 import type { ParsedExcelPlanning } from "./planningExcel";
 
@@ -226,9 +226,97 @@ export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateW
   });
 }
 
-export async function publishWeek(weekStart: string) {
-  const database = await getDb(); if (!database) throw new Error("Database not available");
-  const week = await ensureWeek(weekStart); await database.update(planningWeeks).set({ status: "published", publishedAt: new Date() }).where(eq(planningWeeks.id, week.id));
+export type PlanningPublicationResult = {
+  weekStart: string;
+  notifiedStaffCount: number;
+  alreadyPublished: boolean;
+};
+
+function formatWeekStartForNotification(weekStart: string) {
+  const date = new Date(`${weekStart}T12:00:00Z`);
+  return new Intl.DateTimeFormat("fr-FR", {
+    day: "numeric",
+    month: "long",
+    year: "numeric",
+    timeZone: "UTC",
+  }).format(date);
+}
+
+/**
+ * Publie une semaine et crée une alerte non lue pour chaque salarié actif.
+ * Une semaine déjà publiée n’envoie pas une seconde alerte afin d’éviter le spam.
+ */
+export async function publishWeek(weekStart: string): Promise<PlanningPublicationResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  return database.transaction(async (tx) => {
+    const week = await ensureWeek(weekStart);
+    if (week.status === "published") {
+      return { weekStart, notifiedStaffCount: 0, alreadyPublished: true };
+    }
+
+    const publishedAt = new Date();
+    await tx.update(planningWeeks).set({ status: "published", publishedAt }).where(eq(planningWeeks.id, week.id));
+
+    const recipients = await tx
+      .select({ id: staffMembers.id })
+      .from(staffMembers)
+      .where(and(eq(staffMembers.active, true), eq(staffMembers.role, "employee")));
+
+    if (recipients.length) {
+      const formattedWeekStart = formatWeekStartForNotification(weekStart);
+      await tx.insert(staffNotifications).values(
+        recipients.map((recipient) => ({
+          staffMemberId: recipient.id,
+          planningWeekId: week.id,
+          weekStart,
+          type: "planning_published",
+          title: "Nouveau planning disponible",
+          message: `Le planning de la semaine du ${formattedWeekStart} vient d’être publié.`,
+          createdAt: publishedAt,
+        })),
+      );
+    }
+
+    return { weekStart, notifiedStaffCount: recipients.length, alreadyPublished: false };
+  });
+}
+
+export type StaffNotificationItem = {
+  id: number;
+  weekStart: string;
+  title: string;
+  message: string;
+  createdAt: Date;
+  readAt: Date | null;
+};
+
+export async function getStaffNotifications(staffMemberId: number): Promise<StaffNotificationItem[]> {
+  const database = await getDb();
+  if (!database) return [];
+  return database
+    .select({
+      id: staffNotifications.id,
+      weekStart: staffNotifications.weekStart,
+      title: staffNotifications.title,
+      message: staffNotifications.message,
+      createdAt: staffNotifications.createdAt,
+      readAt: staffNotifications.readAt,
+    })
+    .from(staffNotifications)
+    .where(eq(staffNotifications.staffMemberId, staffMemberId))
+    .orderBy(desc(staffNotifications.createdAt))
+    .limit(20);
+}
+
+export async function markStaffNotificationRead(staffMemberId: number, notificationId: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  await database
+    .update(staffNotifications)
+    .set({ readAt: new Date() })
+    .where(and(eq(staffNotifications.id, notificationId), eq(staffNotifications.staffMemberId, staffMemberId)));
 }
 
 export async function createUnavailabilityForMember(staffMemberId: number, input: { serviceDate: string; period: "all_day" | "midi" | "soir"; reason?: string }) {
