@@ -16,7 +16,7 @@ type PlanningNotification = { id: number; weekStart: string; title: string; mess
 type WeekTemplate = { id: number; name: string; createdAt: Date; updatedAt: Date; shiftCount: number };
 type SaveWeekTemplateResult = { id: number; name: string; savedShiftCount: number };
 type ApplyWeekTemplateResult = { id: number; name: string; weekStart: string; appliedShiftCount: number; inactiveMemberNames: string[] };
-type PublicationCheckItem = { code: "empty_week" | "empty_shift" | "inactive_member" | "unavailability" | "overlap" | "short_rest"; severity: "blocking" | "warning"; title: string; message: string; shiftId?: number; staffMemberId?: number };
+type PublicationCheckItem = { code: "empty_week" | "empty_shift" | "understaffed" | "inactive_member" | "unavailability" | "overlap" | "short_rest"; severity: "blocking" | "warning"; title: string; message: string; shiftId?: number; staffMemberId?: number };
 type PublicationCheck = { blocking: PublicationCheckItem[]; warnings: PublicationCheckItem[]; checkedShiftCount: number; checkedMemberCount: number };
 const emptyPublicationCheck: PublicationCheck = { blocking: [], warnings: [], checkedShiftCount: 0, checkedMemberCount: 0 };
 
