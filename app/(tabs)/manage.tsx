@@ -5,7 +5,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { haptic } from "@/lib/haptics";
 import { usePlanning } from "@/providers/planning-provider";
 import { useRouter } from "expo-router";
-import { Alert, FlatList, Pressable, Text, View } from "react-native";
+import { Alert, FlatList, Platform, Pressable, Text, View } from "react-native";
 
 type PublicationCheck = ReturnType<typeof usePlanning>["publicationCheck"];
 
@@ -19,6 +19,37 @@ function validationDescription(check: PublicationCheck) {
   if (check.blocking.length) return `${check.blocking.length} correction${check.blocking.length > 1 ? "s" : ""} obligatoire${check.blocking.length > 1 ? "s" : ""} avant publication.`;
   if (check.warnings.length) return `${check.warnings.length} avertissement${check.warnings.length > 1 ? "s" : ""} à vérifier avant publication.`;
   return "Aucun conflit, indisponibilité ou sous-effectif détecté. Le planning est prêt à être publié.";
+}
+
+function showActionNotice(title: string, message: string) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    window.alert(`${title}\n\n${message}`);
+    return;
+  }
+  Alert.alert(title, message);
+}
+
+function confirmPlanningAction({
+  title,
+  message,
+  confirmLabel,
+  destructive = false,
+  onConfirm,
+}: {
+  title: string;
+  message: string;
+  confirmLabel: string;
+  destructive?: boolean;
+  onConfirm: () => void | Promise<void>;
+}) {
+  if (Platform.OS === "web" && typeof window !== "undefined") {
+    if (window.confirm(`${title}\n\n${message}`)) void onConfirm();
+    return;
+  }
+  Alert.alert(title, message, [
+    { text: "Annuler", style: "cancel" },
+    { text: confirmLabel, style: destructive ? "destructive" : "default", onPress: () => void onConfirm() },
+  ]);
 }
 
 export default function ManageScreen() {
@@ -88,46 +119,43 @@ export default function ManageScreen() {
 
   const duplicate = () => {
     if (!snapshot.shifts.length) {
-      Alert.alert("Aucun service à dupliquer", "Ajoutez au moins un service à cette semaine avant de la copier.");
+      showActionNotice("Aucun service à dupliquer", "Ajoutez au moins un service à cette semaine avant de la copier.");
       return;
     }
-    Alert.alert(
-      "Dupliquer sur la semaine suivante ?",
-      "Les services, leurs horaires et les salariés affectés seront copiés à J+7. La nouvelle semaine restera en brouillon. Une semaine déjà remplie ne sera jamais écrasée.",
-      [
-        { text: "Annuler", style: "cancel" },
-        { text: "Dupliquer", onPress: async () => {
-          try {
-            const result = await duplicateWeekToNext();
-            haptic.success();
-            Alert.alert("Planning dupliqué", `${result.copiedShiftCount} service${result.copiedShiftCount > 1 ? "s" : ""} ont été copiés pour la semaine du ${result.weekStart}. Vous pouvez maintenant l’annuler tant que la copie reste en brouillon et n’est pas modifiée.`);
-          } catch (error) {
-            Alert.alert("Duplication impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
-          }
-        } },
-      ],
-    );
+    confirmPlanningAction({
+      title: "Dupliquer sur la semaine suivante ?",
+      message: "Les services, leurs horaires et les salariés affectés seront copiés à J+7. La nouvelle semaine restera en brouillon. Une semaine déjà remplie ne sera jamais écrasée.",
+      confirmLabel: "Dupliquer",
+      onConfirm: async () => {
+        try {
+          const result = await duplicateWeekToNext();
+          haptic.success();
+          showActionNotice("Planning dupliqué", `${result.copiedShiftCount} service${result.copiedShiftCount > 1 ? "s" : ""} ont été copiés pour la semaine du ${result.weekStart}. Vous pouvez maintenant l’annuler tant que la copie reste en brouillon et n’est pas modifiée.`);
+        } catch (error) {
+          showActionNotice("Duplication impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
+        }
+      },
+    });
   };
 
   const clearDraft = () => {
     if (isDemo || snapshot.week?.status !== "draft" || !snapshot.shifts.length) return;
     const serviceCount = snapshot.shifts.length;
-    Alert.alert(
-      "Effacer ce brouillon ?",
-      `${serviceCount} service${serviceCount > 1 ? "s" : ""} et leurs affectations seront retirés de la semaine affichée. La semaine restera vide et en brouillon ; les semaines publiées, les salariés et les modèles ne seront pas touchés.`,
-      [
-        { text: "Retour", style: "cancel" },
-        { text: "Effacer le brouillon", style: "destructive", onPress: async () => {
-          try {
-            const result = await clearDraftWeek();
-            haptic.success();
-            Alert.alert("Brouillon effacé", `${result.removedShiftCount} service${result.removedShiftCount > 1 ? "s" : ""} ont été retirés. Vous pouvez maintenant recréer le planning de cette semaine.`);
-          } catch (error) {
-            Alert.alert("Effacement impossible", error instanceof Error ? error.message : "Le brouillon n’a pas été modifié.");
-          }
-        } },
-      ],
-    );
+    confirmPlanningAction({
+      title: "Effacer ce brouillon ?",
+      message: `${serviceCount} service${serviceCount > 1 ? "s" : ""} et leurs affectations seront retirés de la semaine affichée. La semaine restera vide et en brouillon ; les semaines publiées, les salariés et les modèles ne seront pas touchés.`,
+      confirmLabel: "Effacer le brouillon",
+      destructive: true,
+      onConfirm: async () => {
+        try {
+          const result = await clearDraftWeek();
+          haptic.success();
+          showActionNotice("Brouillon effacé", `${result.removedShiftCount} service${result.removedShiftCount > 1 ? "s" : ""} ont été retirés. Vous pouvez maintenant recréer le planning de cette semaine.`);
+        } catch (error) {
+          showActionNotice("Effacement impossible", error instanceof Error ? error.message : "Le brouillon n’a pas été modifié.");
+        }
+      },
+    });
   };
 
   if (!isAdmin) return <ScreenContainer className="items-center justify-center px-8"><IconSymbol name="lock.fill" size={34} color="#687076" /><Text className="mt-4 text-xl font-bold text-foreground">Accès administrateur requis</Text><Text className="mt-2 text-center text-muted">Cet espace est réservé à la création et à la publication des plannings.</Text></ScreenContainer>;
