@@ -1,6 +1,6 @@
 import { IconSymbol } from "@/components/ui/icon-symbol";
 import { formatFrenchDate } from "@/lib/planning-utils";
-import { exportPlanningImage, exportPlanningPdf } from "@/lib/planning-export";
+import { exportPlanningExcel, exportPlanningImage, exportPlanningPdf } from "@/lib/planning-export";
 import { getShiftStyle } from "@/lib/shift-style";
 import { usePlanning, useWeekDays } from "@/providers/planning-provider";
 import { Alert, Pressable, Text, View } from "react-native";
@@ -19,12 +19,13 @@ export function ShiftCard({ shift, compact = false, onPress }: { shift: { id: nu
   return onPress ? <Pressable onPress={onPress} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}>{card}</Pressable> : card;
 }
 
-export function PlanningExportButton({ shifts, compact = false }: { shifts?: Array<{ serviceDate: string; startsAt: string; endsAt: string; position: string; note: string | null; memberIds: number[] }>; compact?: boolean }) {
+export function PlanningExportButton({ shifts, compact = false }: { shifts?: Array<{ serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff?: number; note: string | null; memberIds: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> }>; compact?: boolean }) {
   const { snapshot, visibleShifts, weekStart, showOnlyMine } = usePlanning();
   const data = shifts ?? visibleShifts;
   const scopeLabel = showOnlyMine && !shifts ? "Mes horaires" : "Planning de l’équipe";
   const payload = { weekStart, shifts: data, members: snapshot.members, scopeLabel };
-  const handleExport = () => Alert.alert("Exporter la semaine", "Choisissez un format à télécharger ou partager.", [{ text: "PDF", onPress: () => void exportPlanningPdf(payload).catch((error) => Alert.alert("Export impossible", error instanceof Error ? error.message : "Une erreur est survenue.")) }, { text: "Image", onPress: () => void exportPlanningImage(payload).catch((error) => Alert.alert("Export impossible", error instanceof Error ? error.message : "Une erreur est survenue.")) }, { text: "Annuler", style: "cancel" }]);
+  const showExportError = (error: unknown) => Alert.alert("Export impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
+  const handleExport = () => Alert.alert("Exporter la semaine", "Excel comprend une feuille compatible avec votre import, un détail des services et une synthèse des heures.", [{ text: "Excel (.xlsx)", onPress: () => void exportPlanningExcel(payload).catch(showExportError) }, { text: "PDF", onPress: () => void exportPlanningPdf(payload).catch(showExportError) }, { text: "Image", onPress: () => void exportPlanningImage(payload).catch(showExportError) }, { text: "Annuler", style: "cancel" }]);
   return <Pressable onPress={handleExport} style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })} className={compact ? "rounded-xl bg-surface border border-border p-3 items-center" : "rounded-2xl bg-foreground px-4 py-3 flex-row items-center justify-center gap-2"}><IconSymbol name="square.and.arrow.up" size={18} color={compact ? "#006491" : "#FFFFFF"} /><Text className={compact ? "mt-1 text-xs font-bold text-foreground" : "text-sm font-bold text-white"}>{compact ? "Exporter" : "Exporter la semaine"}</Text></Pressable>;
 }
 
