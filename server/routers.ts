@@ -63,6 +63,7 @@ export const appRouter = router({
     }),
     updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional(), assignmentTimes: z.array(assignmentTimeSchema).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
+    clearDraftWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.clearDraftWeek(input.weekStart)),
     duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
     duplicateWeekUndoInfo: adminProcedure.input(weekSchema).query(({ input }) => db.getDuplicateWeekUndoInfo(input.weekStart)),
     cancelDuplicatedWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.cancelDuplicatedWeek(input.weekStart)),

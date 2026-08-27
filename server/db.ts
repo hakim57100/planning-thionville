@@ -6,6 +6,7 @@ import type { ParsedExcelPlanning } from "./planningExcel";
 import { publicationCheckSummary, validatePlanningBeforePublication, type PublicationCheckResult } from "./planningValidation";
 import { assertTemplateTargetIsEmpty, createTemplateAssignmentSnapshot, createTemplateShiftSnapshot, materializeTemplateAssignment, materializeTemplateShift } from "./weekTemplateUtils";
 import { assertDuplicatedWeekCanBeCancelled, createDuplicateWeekFingerprint } from "./weekDuplicationUtils";
+import { assertDraftWeekCanBeCleared } from "./draftWeekUtils";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -221,6 +222,32 @@ export async function updateShift(input: { id: number; serviceDate?: string; sta
 export async function deleteShift(id: number) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
   await database.delete(shiftAssignments).where(eq(shiftAssignments.shiftId, id)); await database.delete(shifts).where(eq(shifts.id, id));
+}
+
+export type ClearDraftWeekResult = { weekStart: string; removedShiftCount: number };
+
+/**
+ * Efface uniquement les services et affectations de la semaine sélectionnée.
+ * La semaine reste disponible en brouillon pour une nouvelle saisie ; une
+ * semaine publiée est toujours refusée avant toute suppression.
+ */
+export async function clearDraftWeek(weekStart: string): Promise<ClearDraftWeekResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  return database.transaction(async (tx) => {
+    const week = (await tx.select().from(planningWeeks).where(eq(planningWeeks.weekStart, weekStart)).limit(1))[0];
+    assertDraftWeekCanBeCleared({ weekStart, exists: Boolean(week), status: week?.status });
+    if (!week) throw new Error("Le brouillon de cette semaine est introuvable.");
+
+    const weekShifts = await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.planningWeekId, week.id));
+    const shiftIds = weekShifts.map((shift) => shift.id);
+    if (shiftIds.length) await tx.delete(shiftAssignments).where(inArray(shiftAssignments.shiftId, shiftIds));
+    await tx.delete(shifts).where(eq(shifts.planningWeekId, week.id));
+    await tx.delete(planningWeekDuplications).where(eq(planningWeekDuplications.targetWeekId, week.id));
+
+    return { weekStart, removedShiftCount: shiftIds.length };
+  });
 }
 
 export type DuplicateWeekResult = { sourceWeekStart: string; weekStart: string; copiedShiftCount: number };
