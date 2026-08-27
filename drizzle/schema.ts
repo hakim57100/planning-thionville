@@ -107,6 +107,19 @@ export const planningWeekTemplateAssignments = pgTable("planning_week_template_a
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// Trace le contenu exact créé par une duplication. Elle permet d’annuler la
+// copie seulement tant que la semaine cible est restée brouillon et identique.
+export const planningWeekDuplications = pgTable("planning_week_duplications", {
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  sourceWeekId: integer("sourceWeekId").notNull(),
+  sourceWeekStart: varchar("sourceWeekStart", { length: 10 }).notNull(),
+  targetWeekId: integer("targetWeekId").notNull().unique(),
+  targetWeekStart: varchar("targetWeekStart", { length: 10 }).notNull(),
+  targetFingerprint: varchar("targetFingerprint", { length: 64 }).notNull(),
+  targetWeekCreated: boolean("targetWeekCreated").notNull().default(true),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type StaffMember = typeof staffMembers.$inferSelect;
 export type InsertStaffMember = typeof staffMembers.$inferInsert;
 export type StaffUnavailability = typeof staffUnavailability.$inferSelect;
@@ -116,8 +129,9 @@ export type StaffNotification = typeof staffNotifications.$inferSelect;
 export type PlanningWeekTemplate = typeof planningWeekTemplates.$inferSelect;
 export type PlanningWeekTemplateShift = typeof planningWeekTemplateShifts.$inferSelect;
 export type PlanningWeekTemplateAssignment = typeof planningWeekTemplateAssignments.$inferSelect;
+export type PlanningWeekDuplication = typeof planningWeekDuplications.$inferSelect;
 
-// Vue "publique" d'un salarié : jamais le codeHash.
+// Vue "publique" d’un salarié : jamais le codeHash.
 export type PublicStaffMember = Omit<StaffMember, "codeHash">;
 export function toPublicStaffMember(member: StaffMember): PublicStaffMember {
   const { codeHash, ...rest } = member;
