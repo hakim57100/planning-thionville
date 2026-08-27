@@ -1,11 +1,14 @@
 import * as FileSystem from "expo-file-system/legacy";
 import * as Print from "expo-print";
 import * as Sharing from "expo-sharing";
+import * as XLSX from "xlsx";
 import { Platform } from "react-native";
-import type { ExportMember, ExportShift } from "@/lib/planning-export-template";
+import { buildPlanningWorkbook, type ExcelExportPayload } from "@/lib/planning-excel-export";
 import { buildPlanningHtml, buildPlanningSvg } from "@/lib/planning-export-template";
 
-type ExportPayload = { weekStart: string; shifts: ExportShift[]; members: ExportMember[]; scopeLabel: string };
+export type ExportPayload = ExcelExportPayload;
+
+const EXCEL_MIME = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet";
 
 function webDownload(contents: string, filename: string, mimeType: string) {
   const blob = new Blob([contents], { type: mimeType });
@@ -15,6 +18,31 @@ function webDownload(contents: string, filename: string, mimeType: string) {
   link.download = filename;
   link.click();
   URL.revokeObjectURL(url);
+}
+
+export async function exportPlanningExcel(payload: ExportPayload) {
+  const filename = `planning-thionville-${payload.weekStart}.xlsx`;
+  const base64 = XLSX.write(buildPlanningWorkbook(payload), { bookType: "xlsx", type: "base64", compression: true });
+
+  if (Platform.OS === "web") {
+    const binary = atob(base64);
+    const bytes = new Uint8Array(binary.length);
+    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index);
+    const blob = new Blob([bytes], { type: EXCEL_MIME });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = filename;
+    link.click();
+    URL.revokeObjectURL(url);
+    return;
+  }
+
+  if (!FileSystem.cacheDirectory) throw new Error("Le répertoire d’export est indisponible.");
+  const uri = `${FileSystem.cacheDirectory}${filename}`;
+  await FileSystem.writeAsStringAsync(uri, base64, { encoding: FileSystem.EncodingType.Base64 });
+  if (!(await Sharing.isAvailableAsync())) throw new Error("Le partage de fichiers n’est pas disponible sur cet appareil.");
+  await Sharing.shareAsync(uri, { mimeType: EXCEL_MIME, UTI: "org.openxmlformats.spreadsheetml.sheet", dialogTitle: "Exporter le planning au format Excel" });
 }
 
 export async function exportPlanningPdf(payload: ExportPayload) {

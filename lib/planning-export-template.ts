@@ -1,8 +1,8 @@
 import { getWeekDays, formatFrenchDate } from "./planning-utils";
 import { getShiftStyle } from "./shift-style";
 
-export type ExportShift = { serviceDate: string; startsAt: string; endsAt: string; position: string; note: string | null; memberIds: number[] };
-export type ExportMember = { id: number; name: string; jobTitle: string };
+export type ExportShift = { serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff?: number; note: string | null; memberIds: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> };
+export type ExportMember = { id: number; name: string; jobTitle: string; active?: boolean };
 
 function escapeMarkup(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\"/g, "&quot;").replace(/'/g, "&#39;");
