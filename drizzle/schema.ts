@@ -60,6 +60,7 @@ export const shifts = pgTable("shifts", {
   startsAt: varchar("startsAt", { length: 5 }).notNull(),
   endsAt: varchar("endsAt", { length: 5 }).notNull(),
   position: varchar("position", { length: 120 }).notNull(),
+  requiredStaff: integer("requiredStaff").notNull().default(1),
   note: text("note"),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
   updatedAt: timestamp("updatedAt").defaultNow().notNull(),
@@ -69,6 +70,8 @@ export const shiftAssignments = pgTable("shift_assignments", {
   id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
   shiftId: integer("shiftId").notNull(),
   staffMemberId: integer("staffMemberId").notNull(),
+  startsAt: varchar("startsAt", { length: 5 }),
+  endsAt: varchar("endsAt", { length: 5 }),
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
