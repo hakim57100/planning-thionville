@@ -1,10 +1,11 @@
-import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gte, inArray, lte, or, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { InsertStaffMember, planningWeekTemplateAssignments, planningWeekTemplateShifts, planningWeekTemplates, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
+import { InsertStaffMember, planningWeekDuplications, planningWeekTemplateAssignments, planningWeekTemplateShifts, planningWeekTemplates, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
 import { hashAccessCode } from "./_core/codeAuth";
 import type { ParsedExcelPlanning } from "./planningExcel";
 import { publicationCheckSummary, validatePlanningBeforePublication, type PublicationCheckResult } from "./planningValidation";
 import { assertTemplateTargetIsEmpty, createTemplateAssignmentSnapshot, createTemplateShiftSnapshot, materializeTemplateAssignment, materializeTemplateShift } from "./weekTemplateUtils";
+import { assertDuplicatedWeekCanBeCancelled, createDuplicateWeekFingerprint } from "./weekDuplicationUtils";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -49,6 +50,29 @@ function addDaysToIsoDate(isoDate: string, days: number) {
 
 function toPublicMember(member: StaffMember) {
   return { id: member.id, name: member.name, email: member.email, jobTitle: member.jobTitle, color: member.color, role: member.role, active: member.active };
+}
+
+function fingerprintWeek(
+  weekShifts: Array<{ id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff: number; note: string | null }>,
+  assignments: Array<{ shiftId: number; staffMemberId: number; startsAt: string | null; endsAt: string | null }>,
+) {
+  return createDuplicateWeekFingerprint(weekShifts.map((shift) => {
+    const assignmentsForShift = assignments.filter((assignment) => assignment.shiftId === shift.id);
+    return {
+      serviceDate: shift.serviceDate,
+      startsAt: shift.startsAt,
+      endsAt: shift.endsAt,
+      position: shift.position,
+      requiredStaff: shift.requiredStaff,
+      note: shift.note,
+      memberIds: assignmentsForShift.map((assignment) => assignment.staffMemberId),
+      assignmentTimes: assignmentsForShift.map((assignment) => ({
+        staffMemberId: assignment.staffMemberId,
+        startsAt: assignment.startsAt ?? shift.startsAt,
+        endsAt: assignment.endsAt ?? shift.endsAt,
+      })),
+    };
+  }));
 }
 
 export async function getWeekSnapshot(weekStart: string): Promise<WeekSnapshot> {
@@ -200,11 +224,14 @@ export async function deleteShift(id: number) {
 }
 
 export type DuplicateWeekResult = { sourceWeekStart: string; weekStart: string; copiedShiftCount: number };
+export type DuplicateWeekUndoInfo = { sourceWeekStart: string; targetWeekStart: string; copiedShiftCount: number } | null;
+export type CancelDuplicatedWeekResult = { sourceWeekStart: string; weekStart: string; removedShiftCount: number };
 
 /**
  * Copie les services et leurs affectations à J+7. La cible reste en brouillon
  * et la duplication est refusée si elle contient déjà un service, afin de ne
- * jamais écraser un planning saisi à la main.
+ * jamais écraser un planning saisi à la main. Une empreinte de la copie est
+ * sauvegardée pour permettre son annulation seulement tant qu’elle est intacte.
  */
 export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateWeekResult> {
   const database = await getDb(); if (!database) throw new Error("Database not available");
@@ -221,11 +248,15 @@ export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateW
       const existingShifts = await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.planningWeekId, existingTarget.id)).limit(1);
       if (existingShifts.length) throw new Error(`La semaine du ${targetWeekStart} contient déjà des services. Elle n’a pas été modifiée.`);
     }
+    const targetWeekCreated = !existingTarget;
     const targetWeek = existingTarget ?? (await tx.insert(planningWeeks).values({ weekStart: targetWeekStart, status: "draft" }).returning())[0];
     if (!targetWeek) throw new Error("Impossible de créer la semaine cible.");
 
     const sourceShiftIds = sourceShifts.map((shift) => shift.id);
-    const assignments = sourceShiftIds.length ? await tx.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, sourceShiftIds)) : [];
+    const sourceAssignments = sourceShiftIds.length ? await tx.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, sourceShiftIds)) : [];
+    const copiedShifts: Array<{ id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff: number; note: string | null }> = [];
+    const copiedAssignments: Array<{ shiftId: number; staffMemberId: number; startsAt: string | null; endsAt: string | null }> = [];
+
     for (const sourceShift of sourceShifts) {
       const [copiedShift] = await tx.insert(shifts).values({
         planningWeekId: targetWeek.id,
@@ -237,11 +268,89 @@ export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateW
         note: sourceShift.note,
       }).returning();
       if (!copiedShift) throw new Error("Impossible de copier un service.");
-      const memberIds = assignments.filter((assignment) => assignment.shiftId === sourceShift.id).map((assignment) => assignment.staffMemberId);
-      if (memberIds.length) await tx.insert(shiftAssignments).values(memberIds.map((staffMemberId) => { const sourceAssignment = assignments.find((assignment) => assignment.shiftId === sourceShift.id && assignment.staffMemberId === staffMemberId); return { shiftId: copiedShift.id, staffMemberId, startsAt: sourceAssignment?.startsAt ?? null, endsAt: sourceAssignment?.endsAt ?? null }; }));
+      copiedShifts.push(copiedShift);
+      const copiedForThisShift = sourceAssignments
+        .filter((assignment) => assignment.shiftId === sourceShift.id)
+        .map((assignment) => ({ shiftId: copiedShift.id, staffMemberId: assignment.staffMemberId, startsAt: assignment.startsAt, endsAt: assignment.endsAt }));
+      if (copiedForThisShift.length) {
+        await tx.insert(shiftAssignments).values(copiedForThisShift);
+        copiedAssignments.push(...copiedForThisShift);
+      }
     }
 
+    await tx.insert(planningWeekDuplications).values({
+      sourceWeekId: sourceWeek.id,
+      sourceWeekStart: weekStart,
+      targetWeekId: targetWeek.id,
+      targetWeekStart,
+      targetFingerprint: fingerprintWeek(copiedShifts, copiedAssignments),
+      targetWeekCreated,
+    });
+
     return { sourceWeekStart: weekStart, weekStart: targetWeekStart, copiedShiftCount: sourceShifts.length };
+  });
+}
+
+/** Renvoie uniquement une duplication encore annulable depuis la semaine source affichée. */
+export async function getDuplicateWeekUndoInfo(weekStart: string): Promise<DuplicateWeekUndoInfo> {
+  const database = await getDb();
+  if (!database) return null;
+  const expectedNextWeekStart = addDaysToIsoDate(weekStart, 7);
+  const duplication = (await database.select().from(planningWeekDuplications).where(or(
+    and(
+      eq(planningWeekDuplications.sourceWeekStart, weekStart),
+      eq(planningWeekDuplications.targetWeekStart, expectedNextWeekStart),
+    ),
+    eq(planningWeekDuplications.targetWeekStart, weekStart),
+  )).limit(1))[0];
+  if (!duplication) return null;
+  const targetWeekStart = duplication.targetWeekStart;
+
+  const targetWeek = (await database.select().from(planningWeeks).where(eq(planningWeeks.id, duplication.targetWeekId)).limit(1))[0];
+  if (!targetWeek || targetWeek.status === "published") return null;
+  const targetShifts = await database.select().from(shifts).where(eq(shifts.planningWeekId, targetWeek.id));
+  const targetShiftIds = targetShifts.map((shift) => shift.id);
+  const targetAssignments = targetShiftIds.length ? await database.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, targetShiftIds)) : [];
+  if (fingerprintWeek(targetShifts, targetAssignments) !== duplication.targetFingerprint) return null;
+
+  return { sourceWeekStart: duplication.sourceWeekStart, targetWeekStart, copiedShiftCount: targetShifts.length };
+}
+
+/**
+ * Retire la copie uniquement si elle est toujours brouillon et rigoureusement
+ * identique aux services créés par la duplication. La transaction évite toute
+ * suppression partielle et la semaine source n’est jamais écrite.
+ */
+export async function cancelDuplicatedWeek(weekStart: string): Promise<CancelDuplicatedWeekResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const targetWeekStart = addDaysToIsoDate(weekStart, 7);
+
+  return database.transaction(async (tx) => {
+    const duplication = (await tx.select().from(planningWeekDuplications).where(and(
+      eq(planningWeekDuplications.sourceWeekStart, weekStart),
+      eq(planningWeekDuplications.targetWeekStart, targetWeekStart),
+    )).limit(1))[0];
+    if (!duplication) throw new Error("Aucune duplication annulable n’a été trouvée pour cette semaine.");
+
+    const targetWeek = (await tx.select().from(planningWeeks).where(eq(planningWeeks.id, duplication.targetWeekId)).limit(1))[0];
+    if (!targetWeek) throw new Error("La semaine dupliquée est introuvable. Elle n’a pas été modifiée.");
+    const targetShifts = await tx.select().from(shifts).where(eq(shifts.planningWeekId, targetWeek.id));
+    const targetShiftIds = targetShifts.map((shift) => shift.id);
+    const targetAssignments = targetShiftIds.length ? await tx.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, targetShiftIds)) : [];
+    assertDuplicatedWeekCanBeCancelled({
+      targetWeekStart,
+      status: targetWeek.status,
+      expectedFingerprint: duplication.targetFingerprint,
+      actualFingerprint: fingerprintWeek(targetShifts, targetAssignments),
+    });
+
+    if (targetShiftIds.length) await tx.delete(shiftAssignments).where(inArray(shiftAssignments.shiftId, targetShiftIds));
+    await tx.delete(shifts).where(eq(shifts.planningWeekId, targetWeek.id));
+    await tx.delete(planningWeekDuplications).where(eq(planningWeekDuplications.id, duplication.id));
+    if (duplication.targetWeekCreated) await tx.delete(planningWeeks).where(eq(planningWeeks.id, targetWeek.id));
+
+    return { sourceWeekStart: weekStart, weekStart: targetWeekStart, removedShiftCount: targetShifts.length };
   });
 }
 
