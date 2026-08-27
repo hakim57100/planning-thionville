@@ -75,12 +75,47 @@ export const shiftAssignments = pgTable("shift_assignments", {
   createdAt: timestamp("createdAt").defaultNow().notNull(),
 });
 
+// Un modèle représente une semaine type, indépendante des dates réelles.
+// Les services sont enregistrés de J0 à J6 afin de pouvoir les transposer
+// vers n’importe quelle semaine cible, sans jamais modifier la source.
+export const planningWeekTemplates = pgTable("planning_week_templates", {
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  name: varchar("name", { length: 120 }).notNull().unique(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export const planningWeekTemplateShifts = pgTable("planning_week_template_shifts", {
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  templateId: integer("templateId").notNull(),
+  dayOffset: integer("dayOffset").notNull(),
+  startsAt: varchar("startsAt", { length: 5 }).notNull(),
+  endsAt: varchar("endsAt", { length: 5 }).notNull(),
+  position: varchar("position", { length: 120 }).notNull(),
+  requiredStaff: integer("requiredStaff").notNull().default(1),
+  note: text("note"),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+  updatedAt: timestamp("updatedAt").defaultNow().notNull(),
+});
+
+export const planningWeekTemplateAssignments = pgTable("planning_week_template_assignments", {
+  id: integer("id").generatedAlwaysAsIdentity().primaryKey(),
+  templateShiftId: integer("templateShiftId").notNull(),
+  staffMemberId: integer("staffMemberId").notNull(),
+  startsAt: varchar("startsAt", { length: 5 }).notNull(),
+  endsAt: varchar("endsAt", { length: 5 }).notNull(),
+  createdAt: timestamp("createdAt").defaultNow().notNull(),
+});
+
 export type StaffMember = typeof staffMembers.$inferSelect;
 export type InsertStaffMember = typeof staffMembers.$inferInsert;
 export type StaffUnavailability = typeof staffUnavailability.$inferSelect;
 export type Shift = typeof shifts.$inferSelect;
 export type PlanningWeek = typeof planningWeeks.$inferSelect;
 export type StaffNotification = typeof staffNotifications.$inferSelect;
+export type PlanningWeekTemplate = typeof planningWeekTemplates.$inferSelect;
+export type PlanningWeekTemplateShift = typeof planningWeekTemplateShifts.$inferSelect;
+export type PlanningWeekTemplateAssignment = typeof planningWeekTemplateAssignments.$inferSelect;
 
 // Vue "publique" d'un salarié : jamais le codeHash.
 export type PublicStaffMember = Omit<StaffMember, "codeHash">;
