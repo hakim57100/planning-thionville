@@ -101,6 +101,11 @@ function ServiceBoard({ template, serviceDate, shift, extraServiceCount, selecte
   useEffect(() => setCapacity(target), [target, shift?.id]);
 
   const slots = useMemo(() => Array.from({ length: capacity }, (_, index) => shift?.memberIds[index] ?? null), [capacity, shift?.memberIds]);
+  const assignedStaff = shift?.memberIds.length ?? 0;
+  const missingStaff = Math.max(0, capacity - assignedStaff);
+  const coverageLabel = missingStaff
+    ? `Il manque ${missingStaff} personne${missingStaff > 1 ? "s" : ""}.`
+    : "Effectif complet.";
   const periodUnavailable = selectedMember ? unavailableEntries.find((entry) => entry.staffMemberId === selectedMember.id && entry.serviceDate === serviceDate && (entry.period === "all_day" || entry.period === template.key)) : undefined;
 
   const persist = async (memberIds: number[], nextCapacity: number, assignmentTimes?: ShiftAssignmentTime[]) => {
@@ -172,13 +177,20 @@ function ServiceBoard({ template, serviceDate, shift, extraServiceCount, selecte
   };
 
   return <View className="rounded-3xl bg-surface border border-border overflow-hidden">
-    <View className={`px-4 py-4 ${template.key === "midi" ? "bg-[#FFF6DE]" : "bg-[#EAF1FF]"}`}>
-      <View className="flex-row items-center justify-between gap-3"><View className="flex-row items-center gap-3 flex-1"><View className={`h-10 w-10 rounded-xl items-center justify-center ${template.key === "midi" ? "bg-[#D68A00]" : "bg-[#3867B7]"}`}><IconSymbol name="clock.fill" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="text-base font-bold text-foreground">{template.title}</Text><Text className="mt-0.5 text-xs text-muted">Service : {shift?.startsAt ?? template.startsAt} — {shift?.endsAt ?? template.endsAt}</Text></View></View><View className="rounded-full bg-white/80 px-2.5 py-1"><Text className="text-xs font-bold text-foreground">{shift?.memberIds.length ?? 0}/{capacity}</Text></View></View>
-      {extraServiceCount > 0 && <Text className="mt-2 text-xs leading-4 text-muted">{extraServiceCount} autre service du même type existe déjà dans la liste classique.</Text>}
-    </View>
+      <View className={`px-4 py-4 ${template.key === "midi" ? "bg-[#FFF6DE]" : "bg-[#EAF1FF]"}`}>
+        <View className="flex-row items-center justify-between gap-3">
+          <View className="flex-row items-center gap-3 flex-1">
+            <View className={`h-10 w-10 rounded-xl items-center justify-center ${template.key === "midi" ? "bg-[#D68A00]" : "bg-[#3867B7]"}`}><IconSymbol name="clock.fill" size={20} color="#FFFFFF" /></View>
+            <View className="flex-1"><Text className="text-base font-bold text-foreground">{template.title}</Text><Text className="mt-0.5 text-xs text-muted">Service : {shift?.startsAt ?? template.startsAt} — {shift?.endsAt ?? template.endsAt}</Text></View>
+          </View>
+          <View className="rounded-full bg-white/80 px-2.5 py-1"><Text className="text-xs font-bold text-foreground">{assignedStaff}/{capacity}</Text></View>
+        </View>
+        <Text className={`mt-2 text-xs font-bold ${missingStaff ? "text-[#B54708]" : "text-[#087443]"}`}>{coverageLabel}</Text>
+        {extraServiceCount > 0 && <Text className="mt-2 text-xs leading-4 text-muted">{extraServiceCount} autre service du même type existe déjà dans la liste classique.</Text>}
+      </View>
 
-    <View className="p-4"><View className="flex-row items-center justify-between"><Text className="text-sm font-bold text-foreground">Nombre de cases</Text><View className="flex-row items-center gap-3"><Pressable disabled={saving || capacity <= 1} onPress={() => void updateCapacity(-1)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving || capacity <= 1 ? 0.4 : 1 })}><View className="h-8 w-8 rounded-full bg-white border border-border items-center justify-center"><Text className="text-lg font-bold text-foreground">−</Text></View></Pressable><Text className="w-5 text-center text-base font-bold text-foreground">{capacity}</Text><Pressable disabled={saving || capacity >= 20} onPress={() => void updateCapacity(1)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving || capacity >= 20 ? 0.4 : 1 })}><View className="h-8 w-8 rounded-full bg-primary items-center justify-center"><Text className="text-lg font-bold text-white">+</Text></View></Pressable></View></View>
-      <Text className="mt-2 text-xs leading-4 text-muted">Les cases vides sont enregistrées dans le brouillon dès que vous modifiez leur nombre.</Text>
+    <View className="p-4"><View className="flex-row items-center justify-between"><Text className="text-sm font-bold text-foreground">Besoin d’équipe</Text><View className="flex-row items-center gap-3"><Pressable disabled={saving || capacity <= 1} onPress={() => void updateCapacity(-1)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving || capacity <= 1 ? 0.4 : 1 })}><View className="h-8 w-8 rounded-full bg-white border border-border items-center justify-center"><Text className="text-lg font-bold text-foreground">−</Text></View></Pressable><Text className="w-5 text-center text-base font-bold text-foreground">{capacity}</Text><Pressable disabled={saving || capacity >= 20} onPress={() => void updateCapacity(1)} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving || capacity >= 20 ? 0.4 : 1 })}><View className="h-8 w-8 rounded-full bg-primary items-center justify-center"><Text className="text-lg font-bold text-white">+</Text></View></Pressable></View></View>
+      <Text className="mt-2 text-xs leading-4 text-muted">Le nombre de cases correspond au besoin de ce service. Les cases vides sont enregistrées dans le brouillon et signalées avant publication.</Text>
       <View className="mt-4 gap-3">{slots.map((staffMemberId, index) => <ServiceSlot key={`${shift?.id ?? template.key}-${index}-${staffMemberId ?? "empty"}`} index={index} staffMemberId={staffMemberId} shift={shift} selectedMember={selectedMember} saving={saving} onAssign={() => void assignToSlot(index)} onRemove={() => staffMemberId && removeFromSlot(staffMemberId)} onSaveTime={saveIndividualTime} />)}</View>
     </View>
   </View>;
