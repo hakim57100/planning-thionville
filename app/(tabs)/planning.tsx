@@ -41,7 +41,7 @@ export default function PlanningScreen() {
     const shiftsForDay = snapshot.shifts.filter((shift) => shift.serviceDate === selectedDay.iso);
 
     return snapshot.members
-      .filter((member) => member.active)
+      .filter((member) => member.active !== false)
       .map((member) => ({
         id: member.id,
         name: member.name,
