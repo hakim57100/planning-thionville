@@ -8,7 +8,8 @@ import { parsePlanningExcel } from "./planningExcel";
 const isoDateSchema = z.string().regex(/^\d{4}-\d{2}-\d{2}$/);
 const weekSchema = z.object({ weekStart: isoDateSchema });
 const timeSchema = z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/);
-const shiftSchema = z.object({ weekStart: isoDateSchema, serviceDate: isoDateSchema, startsAt: timeSchema, endsAt: timeSchema, position: z.string().trim().min(2).max(120), note: z.string().trim().max(1000).optional(), memberIds: z.array(z.number().int().positive()).max(20) });
+const assignmentTimeSchema = z.object({ staffMemberId: z.number().int().positive(), startsAt: timeSchema, endsAt: timeSchema }).refine((value) => value.startsAt < value.endsAt, { message: "L’heure de fin doit être après l’heure de début." });
+const shiftSchema = z.object({ weekStart: isoDateSchema, serviceDate: isoDateSchema, startsAt: timeSchema, endsAt: timeSchema, position: z.string().trim().min(2).max(120), requiredStaff: z.number().int().min(1).max(20).optional(), note: z.string().trim().max(1000).optional(), memberIds: z.array(z.number().int().positive()).max(20), assignmentTimes: z.array(assignmentTimeSchema).max(20).optional() });
 const unavailabilitySchema = z.object({ serviceDate: isoDateSchema, period: z.enum(["all_day", "midi", "soir"]), reason: z.string().trim().max(255).optional() });
 const staffMemberSchema = z.object({
   name: z.string().trim().min(2).max(120),
@@ -59,7 +60,7 @@ export const appRouter = router({
       const planning = parsePlanningExcel(file);
       return db.importPlanningExcel({ sourceFilename: input.filename, planning });
     }),
-    updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
+    updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional(), assignmentTimes: z.array(assignmentTimeSchema).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
     duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
     prePublishCheck: adminProcedure.input(weekSchema).query(({ input }) => db.getPublicationCheck(input.weekStart)),
