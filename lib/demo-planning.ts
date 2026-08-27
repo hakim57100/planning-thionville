@@ -4,7 +4,8 @@ export type PlanningRole = "admin" | "employee";
 export type Staff = { id: number; name: string; email: string | null; jobTitle: string; color: string; role?: PlanningRole; active?: boolean };
 export type UnavailabilityPeriod = "all_day" | "midi" | "soir";
 export type StaffUnavailability = { id: number; staffMemberId: number; serviceDate: string; period: UnavailabilityPeriod; reason: string | null };
-export type PlanningShift = { id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff?: number; note: string | null; memberIds: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> };
+export type ShiftAssignmentTime = { staffMemberId: number; startsAt: string; endsAt: string };
+export type PlanningShift = { id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff?: number; note: string | null; memberIds: number[]; assignmentTimes?: ShiftAssignmentTime[] };
 export type PlanningSnapshot = { week: { id: number; weekStart: string; status: "draft" | "published"; publishedAt: Date | null } | null; members: Staff[]; shifts: PlanningShift[]; unavailabilities: StaffUnavailability[] };
 
 const team: Staff[] = [
