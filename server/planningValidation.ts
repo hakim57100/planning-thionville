@@ -29,6 +29,7 @@ type CheckShift = {
   endsAt: string;
   position: string;
   memberIds: number[];
+  assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }>;
 };
 
 type CheckUnavailability = {
@@ -79,6 +80,10 @@ export function validatePlanningBeforePublication(input: {
   const blocking: PublicationCheckItem[] = [];
   const warnings: PublicationCheckItem[] = [];
   const staffById = new Map(input.members.map((member) => [member.id, member]));
+  const individualShifts = input.shifts.flatMap((shift) => shift.memberIds.map((staffMemberId) => {
+    const individualTime = shift.assignmentTimes?.find((assignment) => assignment.staffMemberId === staffMemberId);
+    return { ...shift, startsAt: individualTime?.startsAt ?? shift.startsAt, endsAt: individualTime?.endsAt ?? shift.endsAt, memberIds: [staffMemberId] };
+  }));
 
   if (!input.shifts.length) {
     blocking.push({
@@ -99,7 +104,9 @@ export function validatePlanningBeforePublication(input: {
         shiftId: shift.id,
       });
     }
+  }
 
+  for (const shift of individualShifts) {
     for (const staffMemberId of shift.memberIds) {
       const member = staffById.get(staffMemberId);
       if (!member || !member.active) {
@@ -128,7 +135,7 @@ export function validatePlanningBeforePublication(input: {
   }
 
   for (const member of input.members) {
-    const assignedShifts = input.shifts
+    const assignedShifts = individualShifts
       .filter((shift) => shift.memberIds.includes(member.id))
       .sort((first, second) => shiftStart(first).getTime() - shiftStart(second).getTime());
 
