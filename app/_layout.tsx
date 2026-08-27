@@ -74,6 +74,7 @@ export default function RootLayout() {
               <Stack.Screen name="(tabs)" />
               <Stack.Screen name="login" options={{ presentation: "modal" }} />
               <Stack.Screen name="shift-editor" options={{ presentation: "modal" }} />
+              <Stack.Screen name="day-composer" options={{ presentation: "modal" }} />
               <Stack.Screen name="staff-editor" options={{ presentation: "modal" }} />
               <Stack.Screen name="staff-list" options={{ presentation: "modal" }} />
               <Stack.Screen name="dashboard" />
