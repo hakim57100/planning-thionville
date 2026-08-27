@@ -23,7 +23,7 @@ function validationDescription(check: PublicationCheck) {
 
 export default function ManageScreen() {
   const router = useRouter();
-  const { snapshot, isAdmin, publishWeek, duplicateWeekToNext, isDemo, publicationCheck, checkBeforePublish } = usePlanning();
+  const { snapshot, isAdmin, publishWeek, duplicateWeekToNext, duplicateWeekUndoInfo, cancelDuplicatedWeek, isDemo, publicationCheck, checkBeforePublish } = usePlanning();
 
   const showCheck = (check: PublicationCheck) => {
     if (!check.blocking.length && !check.warnings.length) {
@@ -100,9 +100,29 @@ export default function ManageScreen() {
           try {
             const result = await duplicateWeekToNext();
             haptic.success();
-            Alert.alert("Planning dupliqué", `${result.copiedShiftCount} service${result.copiedShiftCount > 1 ? "s" : ""} ont été copiés pour la semaine du ${result.weekStart}.`);
+            Alert.alert("Planning dupliqué", `${result.copiedShiftCount} service${result.copiedShiftCount > 1 ? "s" : ""} ont été copiés pour la semaine du ${result.weekStart}. Vous pouvez maintenant l’annuler tant que la copie reste en brouillon et n’est pas modifiée.`);
           } catch (error) {
             Alert.alert("Duplication impossible", error instanceof Error ? error.message : "Une erreur est survenue.");
+          }
+        } },
+      ],
+    );
+  };
+
+  const cancelDuplicate = () => {
+    if (!duplicateWeekUndoInfo) return;
+    Alert.alert(
+      "Annuler la duplication ?",
+      `${duplicateWeekUndoInfo.copiedShiftCount} service${duplicateWeekUndoInfo.copiedShiftCount > 1 ? "s" : ""} de la semaine du ${duplicateWeekUndoInfo.targetWeekStart} seront retirés. La semaine d’origine du ${duplicateWeekUndoInfo.sourceWeekStart} restera intacte. Cette action est disponible uniquement tant que la copie est restée en brouillon et sans modification.`,
+      [
+        { text: "Retour", style: "cancel" },
+        { text: "Annuler la duplication", style: "destructive", onPress: async () => {
+          try {
+            const result = await cancelDuplicatedWeek();
+            haptic.success();
+            Alert.alert("Duplication annulée", `${result.removedShiftCount} service${result.removedShiftCount > 1 ? "s" : ""} de la semaine du ${result.weekStart} ont été retirés. La semaine d’origine est inchangée.`);
+          } catch (error) {
+            Alert.alert("Annulation impossible", error instanceof Error ? error.message : "La copie n’a pas été modifiée.");
           }
         } },
       ],
@@ -155,6 +175,7 @@ export default function ManageScreen() {
             <View className="flex-row gap-3"><AdminButton label="Ajouter un service" icon="plus" onPress={() => router.push("/shift-editor")} /><AdminButton label="Ajouter un salarié" icon="person.2.fill" onPress={() => router.push("/staff-editor")} /></View>
             <View className="flex-row gap-3"><PlanningExcelImportButton /><PlanningExportButton shifts={snapshot.shifts} compact /></View>
             <Pressable onPress={duplicate} accessibilityRole="button" accessibilityLabel="Dupliquer le planning sur la semaine suivante" style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><View className="rounded-2xl bg-[#E4F1FB] border border-[#B9D9ED] px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-primary items-center justify-center"><IconSymbol name="calendar" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-foreground">Dupliquer la semaine suivante</Text><Text className="mt-1 text-xs leading-4 text-muted">Copie les services et les affectations à J+7, en brouillon.</Text></View><IconSymbol name="chevron.right" size={20} color="#006491" /></View></Pressable>
+            {duplicateWeekUndoInfo && <Pressable onPress={cancelDuplicate} accessibilityRole="button" accessibilityLabel="Annuler la duplication de semaine" style={({ pressed }) => ({ opacity: pressed ? 0.72 : 1 })}><View className="rounded-2xl bg-[#FFF1F0] border border-[#F4C7C3] px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-[#B42318] items-center justify-center"><IconSymbol name="trash" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-foreground">Annuler la duplication</Text><Text className="mt-1 text-xs leading-4 text-muted">Retire la copie du {duplicateWeekUndoInfo.targetWeekStart}, seulement si elle est intacte et en brouillon.</Text></View><IconSymbol name="chevron.right" size={20} color="#B42318" /></View></Pressable>}
             <Pressable onPress={() => router.push("/dashboard")} style={({ pressed }) => ({ opacity: pressed ? 0.75 : 1 })}><View className="rounded-2xl bg-foreground px-4 py-4 flex-row items-center gap-3"><View className="h-10 w-10 rounded-xl bg-primary items-center justify-center"><IconSymbol name="chart.bar.fill" size={20} color="#FFFFFF" /></View><View className="flex-1"><Text className="font-bold text-white">Tableau de bord des heures</Text><Text className="mt-1 text-xs text-white/70">Consultez le total hebdomadaire par salarié.</Text></View><IconSymbol name="chevron.right" size={20} color="#FFFFFF" /></View></Pressable>
           </View>
         }
