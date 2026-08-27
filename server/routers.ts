@@ -62,6 +62,7 @@ export const appRouter = router({
     updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
     duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
+    prePublishCheck: adminProcedure.input(weekSchema).query(({ input }) => db.getPublicationCheck(input.weekStart)),
     publishWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.publishWeek(input.weekStart)),
     notifications: protectedProcedure.query(({ ctx }) =>
       ctx.user.role === "employee" ? db.getStaffNotifications(ctx.user.id) : [],
