@@ -1,9 +1,10 @@
 import { and, asc, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { drizzle } from "drizzle-orm/node-postgres";
-import { InsertStaffMember, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
+import { InsertStaffMember, planningWeekTemplateAssignments, planningWeekTemplateShifts, planningWeekTemplates, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
 import { hashAccessCode } from "./_core/codeAuth";
 import type { ParsedExcelPlanning } from "./planningExcel";
 import { publicationCheckSummary, validatePlanningBeforePublication, type PublicationCheckResult } from "./planningValidation";
+import { assertTemplateTargetIsEmpty, createTemplateAssignmentSnapshot, createTemplateShiftSnapshot, materializeTemplateAssignment, materializeTemplateShift } from "./weekTemplateUtils";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -241,6 +242,143 @@ export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateW
     }
 
     return { sourceWeekStart: weekStart, weekStart: targetWeekStart, copiedShiftCount: sourceShifts.length };
+  });
+}
+
+export type WeekTemplateItem = {
+  id: number;
+  name: string;
+  createdAt: Date;
+  updatedAt: Date;
+  shiftCount: number;
+};
+
+export type SaveWeekTemplateResult = { id: number; name: string; savedShiftCount: number };
+export type ApplyWeekTemplateResult = { id: number; name: string; weekStart: string; appliedShiftCount: number; inactiveMemberNames: string[] };
+
+export async function listWeekTemplates(): Promise<WeekTemplateItem[]> {
+  const database = await getDb();
+  if (!database) return [];
+  const templates = await database.select().from(planningWeekTemplates).orderBy(asc(planningWeekTemplates.name));
+  return Promise.all(templates.map(async (template) => {
+    const templateShifts = await database
+      .select({ id: planningWeekTemplateShifts.id })
+      .from(planningWeekTemplateShifts)
+      .where(eq(planningWeekTemplateShifts.templateId, template.id));
+    return { ...template, shiftCount: templateShifts.length };
+  }));
+}
+
+/** Enregistre une photographie de la semaine sous forme de jours relatifs J0 à J6. */
+export async function saveWeekAsTemplate(input: { weekStart: string; name: string }): Promise<SaveWeekTemplateResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  return database.transaction(async (tx) => {
+    const sourceWeek = (await tx.select().from(planningWeeks).where(eq(planningWeeks.weekStart, input.weekStart)).limit(1))[0];
+    if (!sourceWeek) throw new Error("La semaine à enregistrer ne contient aucun service.");
+
+    const sourceShifts = await tx.select().from(shifts).where(eq(shifts.planningWeekId, sourceWeek.id)).orderBy(asc(shifts.serviceDate), asc(shifts.startsAt));
+    if (!sourceShifts.length) throw new Error("Ajoutez au moins un service avant d’enregistrer un modèle.");
+
+    const duplicateName = (await tx.select({ id: planningWeekTemplates.id }).from(planningWeekTemplates).where(eq(planningWeekTemplates.name, input.name)).limit(1))[0];
+    if (duplicateName) throw new Error("Un modèle porte déjà ce nom. Choisissez un autre nom.");
+
+    const [template] = await tx.insert(planningWeekTemplates).values({ name: input.name }).returning();
+    if (!template) throw new Error("Impossible de créer le modèle de semaine.");
+
+    const sourceShiftIds = sourceShifts.map((shift) => shift.id);
+    const assignments = sourceShiftIds.length
+      ? await tx.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, sourceShiftIds))
+      : [];
+
+    for (const sourceShift of sourceShifts) {
+      const templateShiftData = createTemplateShiftSnapshot(input.weekStart, sourceShift);
+      const [templateShift] = await tx.insert(planningWeekTemplateShifts).values({
+        templateId: template.id,
+        ...templateShiftData,
+      }).returning();
+      if (!templateShift) throw new Error("Impossible d’enregistrer un service du modèle.");
+
+      const sourceAssignments = assignments.filter((assignment) => assignment.shiftId === sourceShift.id);
+      if (sourceAssignments.length) {
+        await tx.insert(planningWeekTemplateAssignments).values(sourceAssignments.map((assignment) => ({
+          templateShiftId: templateShift.id,
+          ...createTemplateAssignmentSnapshot(assignment, sourceShift),
+        })));
+      }
+    }
+
+    return { id: template.id, name: template.name, savedShiftCount: sourceShifts.length };
+  });
+}
+
+export async function renameWeekTemplate(input: { id: number; name: string }) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const duplicateName = (await database.select({ id: planningWeekTemplates.id }).from(planningWeekTemplates).where(eq(planningWeekTemplates.name, input.name)).limit(1))[0];
+  if (duplicateName && duplicateName.id !== input.id) throw new Error("Un modèle porte déjà ce nom. Choisissez un autre nom.");
+  const [updated] = await database.update(planningWeekTemplates).set({ name: input.name, updatedAt: new Date() }).where(eq(planningWeekTemplates.id, input.id)).returning();
+  if (!updated) throw new Error("Modèle introuvable.");
+  return updated;
+}
+
+export async function deleteWeekTemplate(id: number) {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const deleted = await database.delete(planningWeekTemplates).where(eq(planningWeekTemplates.id, id)).returning({ id: planningWeekTemplates.id });
+  if (!deleted.length) throw new Error("Modèle introuvable.");
+}
+
+/** Applique un modèle seulement sur une semaine brouillon sans service : aucune donnée n’est remplacée. */
+export async function applyWeekTemplate(input: { id: number; weekStart: string }): Promise<ApplyWeekTemplateResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+
+  return database.transaction(async (tx) => {
+    const template = (await tx.select().from(planningWeekTemplates).where(eq(planningWeekTemplates.id, input.id)).limit(1))[0];
+    if (!template) throw new Error("Modèle introuvable.");
+
+    const templateShifts = await tx.select().from(planningWeekTemplateShifts).where(eq(planningWeekTemplateShifts.templateId, template.id)).orderBy(asc(planningWeekTemplateShifts.dayOffset), asc(planningWeekTemplateShifts.startsAt));
+    if (!templateShifts.length) throw new Error("Ce modèle ne contient aucun service.");
+
+    const existingWeek = (await tx.select().from(planningWeeks).where(eq(planningWeeks.weekStart, input.weekStart)).limit(1))[0];
+    const existingShift = existingWeek
+      ? await tx.select({ id: shifts.id }).from(shifts).where(eq(shifts.planningWeekId, existingWeek.id)).limit(1)
+      : [];
+    assertTemplateTargetIsEmpty({ status: existingWeek?.status, hasServices: existingShift.length > 0, weekStart: input.weekStart });
+    const targetWeek = existingWeek ?? (await tx.insert(planningWeeks).values({ weekStart: input.weekStart, status: "draft" }).returning())[0];
+    if (!targetWeek) throw new Error("Impossible de créer la semaine cible.");
+
+    const templateShiftIds = templateShifts.map((shift) => shift.id);
+    const templateAssignments = templateShiftIds.length
+      ? await tx.select().from(planningWeekTemplateAssignments).where(inArray(planningWeekTemplateAssignments.templateShiftId, templateShiftIds))
+      : [];
+    const assignedStaffIds = [...new Set(templateAssignments.map((assignment) => assignment.staffMemberId))];
+    const members = assignedStaffIds.length
+      ? await tx.select({ id: staffMembers.id, name: staffMembers.name, active: staffMembers.active }).from(staffMembers).where(inArray(staffMembers.id, assignedStaffIds))
+      : [];
+    const existingStaffIds = new Set(members.map((member) => member.id));
+    const missingStaffIds = assignedStaffIds.filter((id) => !existingStaffIds.has(id));
+    if (missingStaffIds.length) throw new Error("Un ou plusieurs salariés du modèle n’existent plus. Le planning cible n’a pas été modifié.");
+    const inactiveMemberNames = members.filter((member) => !member.active).map((member) => member.name);
+
+    for (const templateShift of templateShifts) {
+      const [createdShift] = await tx.insert(shifts).values({
+        planningWeekId: targetWeek.id,
+        ...materializeTemplateShift(input.weekStart, templateShift),
+      }).returning();
+      if (!createdShift) throw new Error("Impossible d’appliquer un service du modèle.");
+      const assignmentsForShift = templateAssignments.filter((assignment) => assignment.templateShiftId === templateShift.id);
+      if (assignmentsForShift.length) {
+        await tx.insert(shiftAssignments).values(assignmentsForShift.map((assignment) => ({
+          shiftId: createdShift.id,
+          ...materializeTemplateAssignment(assignment),
+        })));
+      }
+    }
+
+    return { id: template.id, name: template.name, weekStart: input.weekStart, appliedShiftCount: templateShifts.length, inactiveMemberNames };
   });
 }
 

@@ -22,6 +22,7 @@ const excelImportSchema = z.object({
   filename: z.string().trim().regex(/^[^\\/]+\.xlsx$/i, "Le fichier doit être au format .xlsx.").max(180),
   contentBase64: z.string().trim().min(1).max(7 * 1024 * 1024),
 });
+const templateNameSchema = z.string().trim().min(2, "Le nom du modèle doit contenir au moins 2 caractères.").max(120);
 
 export const appRouter = router({
   system: router({
@@ -63,6 +64,19 @@ export const appRouter = router({
     updateShift: adminProcedure.input(shiftSchema.partial().extend({ id: z.number().int().positive(), note: z.string().trim().max(1000).nullable().optional(), memberIds: z.array(z.number().int().positive()).max(20).optional(), assignmentTimes: z.array(assignmentTimeSchema).max(20).optional() })).mutation(({ input }) => db.updateShift(input)),
     deleteShift: adminProcedure.input(z.object({ id: z.number().int().positive() })).mutation(({ input }) => db.deleteShift(input.id)),
     duplicateWeekToNext: adminProcedure.input(weekSchema).mutation(({ input }) => db.duplicateWeekToNext(input.weekStart)),
+    listWeekTemplates: adminProcedure.query(() => db.listWeekTemplates()),
+    saveWeekAsTemplate: adminProcedure
+      .input(z.object({ weekStart: isoDateSchema, name: templateNameSchema }))
+      .mutation(({ input }) => db.saveWeekAsTemplate(input)),
+    renameWeekTemplate: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), name: templateNameSchema }))
+      .mutation(({ input }) => db.renameWeekTemplate(input)),
+    deleteWeekTemplate: adminProcedure
+      .input(z.object({ id: z.number().int().positive() }))
+      .mutation(({ input }) => db.deleteWeekTemplate(input.id)),
+    applyWeekTemplate: adminProcedure
+      .input(z.object({ id: z.number().int().positive(), weekStart: isoDateSchema }))
+      .mutation(({ input }) => db.applyWeekTemplate(input)),
     prePublishCheck: adminProcedure.input(weekSchema).query(({ input }) => db.getPublicationCheck(input.weekStart)),
     publishWeek: adminProcedure.input(weekSchema).mutation(({ input }) => db.publishWeek(input.weekStart)),
     notifications: protectedProcedure.query(({ ctx }) =>
