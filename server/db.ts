@@ -3,6 +3,7 @@ import { drizzle } from "drizzle-orm/node-postgres";
 import { InsertStaffMember, planningWeeks, shifts, shiftAssignments, staffMembers, staffNotifications, staffUnavailability, StaffMember } from "../drizzle/schema";
 import { hashAccessCode } from "./_core/codeAuth";
 import type { ParsedExcelPlanning } from "./planningExcel";
+import { publicationCheckSummary, validatePlanningBeforePublication, type PublicationCheckResult } from "./planningValidation";
 
 let _db: ReturnType<typeof drizzle> | null = null;
 
@@ -63,6 +64,20 @@ export async function getWeekSnapshot(weekStart: string): Promise<WeekSnapshot> 
   const ids = weekShifts.map((shift) => shift.id);
   const assignments = ids.length ? await database.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, ids)) : [];
   return { week: { id: week.id, weekStart: week.weekStart, status: week.status, publishedAt: week.publishedAt }, members, unavailabilities, shifts: weekShifts.map((shift) => ({ ...shift, memberIds: assignments.filter((assignment) => assignment.shiftId === shift.id).map((assignment) => assignment.staffMemberId) })) };
+}
+
+export async function getPublicationCheck(weekStart: string): Promise<PublicationCheckResult> {
+  const database = await getDb();
+  if (!database) throw new Error("Database not available");
+  const [snapshot, allMembers] = await Promise.all([
+    getWeekSnapshot(weekStart),
+    database.select({ id: staffMembers.id, name: staffMembers.name, active: staffMembers.active }).from(staffMembers),
+  ]);
+  return validatePlanningBeforePublication({
+    members: allMembers,
+    shifts: snapshot.shifts,
+    unavailabilities: snapshot.unavailabilities,
+  });
 }
 
 export async function ensureWeek(weekStart: string) {
@@ -249,6 +264,16 @@ function formatWeekStartForNotification(weekStart: string) {
 export async function publishWeek(weekStart: string): Promise<PlanningPublicationResult> {
   const database = await getDb();
   if (!database) throw new Error("Database not available");
+
+  const existingWeek = (await database.select().from(planningWeeks).where(eq(planningWeeks.weekStart, weekStart)).limit(1))[0];
+  if (existingWeek?.status === "published") {
+    return { weekStart, notifiedStaffCount: 0, alreadyPublished: true };
+  }
+
+  const check = await getPublicationCheck(weekStart);
+  if (check.blocking.length) {
+    throw new Error(`Publication bloquée : ${publicationCheckSummary(check)}. Corrigez les problèmes signalés avant de publier.`);
+  }
 
   return database.transaction(async (tx) => {
     const week = await ensureWeek(weekStart);
