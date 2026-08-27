@@ -1,7 +1,7 @@
 export type PublicationCheckSeverity = "blocking" | "warning";
 
 export type PublicationCheckItem = {
-  code: "empty_week" | "empty_shift" | "inactive_member" | "unavailability" | "overlap" | "short_rest";
+  code: "empty_week" | "empty_shift" | "understaffed" | "inactive_member" | "unavailability" | "overlap" | "short_rest";
   severity: PublicationCheckSeverity;
   title: string;
   message: string;
@@ -28,6 +28,7 @@ type CheckShift = {
   startsAt: string;
   endsAt: string;
   position: string;
+  requiredStaff?: number;
   memberIds: number[];
   assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }>;
 };
@@ -95,12 +96,27 @@ export function validatePlanningBeforePublication(input: {
   }
 
   for (const shift of input.shifts) {
-    if (!shift.memberIds.length) {
+    const requiredStaff = Math.max(1, shift.requiredStaff ?? (shift.memberIds.length || 1));
+    const assignedStaff = shift.memberIds.length;
+
+    if (!assignedStaff) {
       blocking.push({
         code: "empty_shift",
         severity: "blocking",
         title: "Service sans salarié",
         message: `${shift.position} du ${shift.serviceDate} à ${shift.startsAt} n’a aucune personne affectée.`,
+        shiftId: shift.id,
+      });
+      continue;
+    }
+
+    if (assignedStaff < requiredStaff) {
+      const missingStaff = requiredStaff - assignedStaff;
+      warnings.push({
+        code: "understaffed",
+        severity: "warning",
+        title: "Effectif incomplet",
+        message: `${shift.position} du ${shift.serviceDate} à ${shift.startsAt} est couvert par ${assignedStaff}/${requiredStaff} personne${requiredStaff > 1 ? "s" : ""} : il manque ${missingStaff} personne${missingStaff > 1 ? "s" : ""}.`,
         shiftId: shift.id,
       });
     }
