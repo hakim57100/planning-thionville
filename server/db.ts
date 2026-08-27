@@ -29,7 +29,7 @@ export async function getActiveStaffMembersWithCode(): Promise<StaffMember[]> {
 export type WeekSnapshot = {
   week: { id: number; weekStart: string; status: "draft" | "published"; publishedAt: Date | null } | null;
   members: Array<{ id: number; name: string; email: string | null; jobTitle: string; color: string; role: "admin" | "employee"; active: boolean }>;
-  shifts: Array<{ id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; note: string | null; memberIds: number[] }>;
+  shifts: Array<{ id: number; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff: number; note: string | null; memberIds: number[]; assignmentTimes: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> }>;
   unavailabilities: Array<{ id: number; staffMemberId: number; serviceDate: string; period: "all_day" | "midi" | "soir"; reason: string | null }>;
 };
 
@@ -63,7 +63,7 @@ export async function getWeekSnapshot(weekStart: string): Promise<WeekSnapshot> 
   const weekShifts = await database.select().from(shifts).where(eq(shifts.planningWeekId, week.id)).orderBy(asc(shifts.serviceDate), asc(shifts.startsAt));
   const ids = weekShifts.map((shift) => shift.id);
   const assignments = ids.length ? await database.select().from(shiftAssignments).where(inArray(shiftAssignments.shiftId, ids)) : [];
-  return { week: { id: week.id, weekStart: week.weekStart, status: week.status, publishedAt: week.publishedAt }, members, unavailabilities, shifts: weekShifts.map((shift) => ({ ...shift, memberIds: assignments.filter((assignment) => assignment.shiftId === shift.id).map((assignment) => assignment.staffMemberId) })) };
+  return { week: { id: week.id, weekStart: week.weekStart, status: week.status, publishedAt: week.publishedAt }, members, unavailabilities, shifts: weekShifts.map((shift) => { const own = assignments.filter((assignment) => assignment.shiftId === shift.id); return { ...shift, memberIds: own.map((assignment) => assignment.staffMemberId), assignmentTimes: own.map((assignment) => ({ staffMemberId: assignment.staffMemberId, startsAt: assignment.startsAt ?? shift.startsAt, endsAt: assignment.endsAt ?? shift.endsAt })) }; }) };
 }
 
 export async function getPublicationCheck(weekStart: string): Promise<PublicationCheckResult> {
@@ -175,20 +175,22 @@ export async function setStaffActive(id: number, active: boolean) {
   await database.update(staffMembers).set({ active, updatedAt: new Date() }).where(eq(staffMembers.id, id));
 }
 
-export async function createShift(input: { weekStart: string; serviceDate: string; startsAt: string; endsAt: string; position: string; note?: string; memberIds: number[] }) {
+export async function createShift(input: { weekStart: string; serviceDate: string; startsAt: string; endsAt: string; position: string; requiredStaff?: number; note?: string; memberIds: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> }) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
   const week = await ensureWeek(input.weekStart);
-  const [created] = await database.insert(shifts).values({ planningWeekId: week.id, serviceDate: input.serviceDate, startsAt: input.startsAt, endsAt: input.endsAt, position: input.position, note: input.note || null }).returning();
+  const requiredStaff = Math.max(1, input.requiredStaff ?? (input.memberIds.length || 1));
+  const [created] = await database.insert(shifts).values({ planningWeekId: week.id, serviceDate: input.serviceDate, startsAt: input.startsAt, endsAt: input.endsAt, position: input.position, requiredStaff, note: input.note || null }).returning();
   const shiftId = created.id;
-  if (input.memberIds.length) await database.insert(shiftAssignments).values(input.memberIds.map((staffMemberId) => ({ shiftId, staffMemberId })));
+  const timeByStaffMember = new Map(input.assignmentTimes?.map((assignment) => [assignment.staffMemberId, assignment]));
+  if (input.memberIds.length) await database.insert(shiftAssignments).values(input.memberIds.map((staffMemberId) => ({ shiftId, staffMemberId, startsAt: timeByStaffMember.get(staffMemberId)?.startsAt ?? null, endsAt: timeByStaffMember.get(staffMemberId)?.endsAt ?? null })));
   return shiftId;
 }
 
-export async function updateShift(input: { id: number; serviceDate?: string; startsAt?: string; endsAt?: string; position?: string; note?: string | null; memberIds?: number[] }) {
+export async function updateShift(input: { id: number; serviceDate?: string; startsAt?: string; endsAt?: string; position?: string; requiredStaff?: number; note?: string | null; memberIds?: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> }) {
   const database = await getDb(); if (!database) throw new Error("Database not available");
-  const { id, memberIds, ...changes } = input;
+  const { id, memberIds, assignmentTimes, ...changes } = input;
   if (Object.keys(changes).length) await database.update(shifts).set(changes).where(eq(shifts.id, id));
-  if (memberIds) { await database.delete(shiftAssignments).where(eq(shiftAssignments.shiftId, id)); if (memberIds.length) await database.insert(shiftAssignments).values(memberIds.map((staffMemberId) => ({ shiftId: id, staffMemberId }))); }
+  if (memberIds) { const timeByStaffMember = new Map(assignmentTimes?.map((assignment) => [assignment.staffMemberId, assignment])); await database.delete(shiftAssignments).where(eq(shiftAssignments.shiftId, id)); if (memberIds.length) await database.insert(shiftAssignments).values(memberIds.map((staffMemberId) => ({ shiftId: id, staffMemberId, startsAt: timeByStaffMember.get(staffMemberId)?.startsAt ?? null, endsAt: timeByStaffMember.get(staffMemberId)?.endsAt ?? null }))); }
 }
 
 export async function deleteShift(id: number) {
@@ -230,11 +232,12 @@ export async function duplicateWeekToNext(weekStart: string): Promise<DuplicateW
         startsAt: sourceShift.startsAt,
         endsAt: sourceShift.endsAt,
         position: sourceShift.position,
+        requiredStaff: sourceShift.requiredStaff,
         note: sourceShift.note,
       }).returning();
       if (!copiedShift) throw new Error("Impossible de copier un service.");
       const memberIds = assignments.filter((assignment) => assignment.shiftId === sourceShift.id).map((assignment) => assignment.staffMemberId);
-      if (memberIds.length) await tx.insert(shiftAssignments).values(memberIds.map((staffMemberId) => ({ shiftId: copiedShift.id, staffMemberId })));
+      if (memberIds.length) await tx.insert(shiftAssignments).values(memberIds.map((staffMemberId) => { const sourceAssignment = assignments.find((assignment) => assignment.shiftId === sourceShift.id && assignment.staffMemberId === staffMemberId); return { shiftId: copiedShift.id, staffMemberId, startsAt: sourceAssignment?.startsAt ?? null, endsAt: sourceAssignment?.endsAt ?? null }; }));
     }
 
     return { sourceWeekStart: weekStart, weekStart: targetWeekStart, copiedShiftCount: sourceShifts.length };
@@ -359,5 +362,5 @@ export async function getEmployeeWeek(staffMemberId: number, weekStart: string):
   const snapshot = await getWeekSnapshot(weekStart);
   const employeeUnavailabilities = snapshot.unavailabilities.filter((entry) => entry.staffMemberId === staffMemberId);
   if (!snapshot.week || snapshot.week.status !== "published") return { ...snapshot, shifts: [], unavailabilities: employeeUnavailabilities };
-  return { ...snapshot, shifts: snapshot.shifts.filter((shift) => shift.memberIds.includes(staffMemberId)), unavailabilities: employeeUnavailabilities };
+  return { ...snapshot, shifts: snapshot.shifts.filter((shift) => shift.memberIds.includes(staffMemberId)).map((shift) => ({ ...shift, memberIds: [staffMemberId], assignmentTimes: shift.assignmentTimes.filter((assignment) => assignment.staffMemberId === staffMemberId) })), unavailabilities: employeeUnavailabilities };
 }
