@@ -18,7 +18,7 @@ function listIssues(items: PublicationCheck["blocking"], maximum = 4) {
 function validationDescription(check: PublicationCheck) {
   if (check.blocking.length) return `${check.blocking.length} correction${check.blocking.length > 1 ? "s" : ""} obligatoire${check.blocking.length > 1 ? "s" : ""} avant publication.`;
   if (check.warnings.length) return `${check.warnings.length} avertissement${check.warnings.length > 1 ? "s" : ""} à vérifier avant publication.`;
-  return "Aucun conflit ou indisponibilité détecté. Le planning est prêt à être publié.";
+  return "Aucun conflit, indisponibilité ou sous-effectif détecté. Le planning est prêt à être publié.";
 }
 
 export default function ManageScreen() {
@@ -27,7 +27,7 @@ export default function ManageScreen() {
 
   const showCheck = (check: PublicationCheck) => {
     if (!check.blocking.length && !check.warnings.length) {
-      Alert.alert("Contrôle terminé", "Aucun conflit, salarié indisponible, profil inactif ou service vide n’a été détecté.");
+      Alert.alert("Contrôle terminé", "Aucun conflit, salarié indisponible, profil inactif, service vide ou sous-effectif n’a été détecté.");
       return;
     }
     const sections: string[] = [];
