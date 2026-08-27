@@ -62,11 +62,26 @@ export default function Login() {
         <Pressable
           onPress={submit}
           disabled={submitting || !code.trim()}
-          style={({ pressed }) => ({ opacity: pressed || submitting || !code.trim() ? 0.6 : 1 })}
-          className="rounded-2xl bg-primary py-4 flex-row items-center justify-center gap-2"
+          accessibilityRole="button"
+          accessibilityLabel="Se connecter avec le code d’accès"
+          style={({ pressed }) => {
+            const disabled = submitting || !code.trim();
+            return {
+              opacity: pressed || disabled ? 0.72 : 1,
+              backgroundColor: disabled ? "#7C8B94" : "#006491",
+              borderColor: disabled ? "#687780" : "#004B70",
+              borderWidth: 1,
+              borderRadius: 16,
+              minHeight: 56,
+              flexDirection: "row",
+              alignItems: "center",
+              justifyContent: "center",
+              gap: 8,
+            };
+          }}
         >
           {submitting ? <ActivityIndicator color="#FFFFFF" /> : <IconSymbol name="checkmark.circle.fill" size={19} color="#FFFFFF" />}
-          <Text className="text-base font-bold text-white">Valider</Text>
+          <Text style={{ color: "#FFFFFF" }} className="text-base font-bold">Se connecter</Text>
         </Pressable>
         <Text className="text-center text-xs leading-4 text-muted">
           Demandez un code à l’administrateur du restaurant. Il peut être régénéré à tout moment depuis l’espace admin.
