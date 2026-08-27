@@ -13,6 +13,9 @@ type ExcelImportResult = { weekStart: string; importedShiftCount: number; planni
 type DuplicateWeekResult = { sourceWeekStart: string; weekStart: string; copiedShiftCount: number };
 type PlanningPublicationResult = { weekStart: string; notifiedStaffCount: number; alreadyPublished: boolean };
 type PlanningNotification = { id: number; weekStart: string; title: string; message: string; createdAt: Date; readAt: Date | null };
+type WeekTemplate = { id: number; name: string; createdAt: Date; updatedAt: Date; shiftCount: number };
+type SaveWeekTemplateResult = { id: number; name: string; savedShiftCount: number };
+type ApplyWeekTemplateResult = { id: number; name: string; weekStart: string; appliedShiftCount: number; inactiveMemberNames: string[] };
 type PublicationCheckItem = { code: "empty_week" | "empty_shift" | "inactive_member" | "unavailability" | "overlap" | "short_rest"; severity: "blocking" | "warning"; title: string; message: string; shiftId?: number; staffMemberId?: number };
 type PublicationCheck = { blocking: PublicationCheckItem[]; warnings: PublicationCheckItem[]; checkedShiftCount: number; checkedMemberCount: number };
 const emptyPublicationCheck: PublicationCheck = { blocking: [], warnings: [], checkedShiftCount: 0, checkedMemberCount: 0 };
@@ -28,7 +31,7 @@ type PlanningContextValue = {
   isDemo: boolean; role: PlanningRole; weekStart: string; snapshot: PlanningSnapshot; loading: boolean; isAdmin: boolean;
   showOnlyMine: boolean; personalMember: Staff | null; visibleShifts: PlanningShift[];
   setWeekStart: (value: string) => void; changeWeek: (offset: number) => void; setDemoRole: (role: PlanningRole) => void; setShowOnlyMine: (value: boolean) => void;
-  createShift: (input: ShiftInput) => Promise<void>; importPlanningExcel: (input: ExcelImportInput) => Promise<ExcelImportResult>; updateShift: (id: number, input: Partial<ShiftInput>) => Promise<void>; deleteShift: (id: number) => Promise<void>; createStaffMember: (input: StaffInput) => Promise<string | null>; updateStaffMember: (id: number, input: StaffInput) => Promise<void>; regenerateStaffCode: (id: number) => Promise<string | null>; setStaffActive: (id: number, active: boolean) => Promise<void>; duplicateWeekToNext: () => Promise<DuplicateWeekResult>; publishWeek: () => Promise<PlanningPublicationResult>;
+  createShift: (input: ShiftInput) => Promise<void>; importPlanningExcel: (input: ExcelImportInput) => Promise<ExcelImportResult>; updateShift: (id: number, input: Partial<ShiftInput>) => Promise<void>; deleteShift: (id: number) => Promise<void>; createStaffMember: (input: StaffInput) => Promise<string | null>; updateStaffMember: (id: number, input: StaffInput) => Promise<void>; regenerateStaffCode: (id: number) => Promise<string | null>; setStaffActive: (id: number, active: boolean) => Promise<void>; duplicateWeekToNext: () => Promise<DuplicateWeekResult>; weekTemplates: WeekTemplate[]; saveWeekAsTemplate: (name: string) => Promise<SaveWeekTemplateResult>; renameWeekTemplate: (id: number, name: string) => Promise<void>; deleteWeekTemplate: (id: number) => Promise<void>; applyWeekTemplate: (id: number) => Promise<ApplyWeekTemplateResult>; publishWeek: () => Promise<PlanningPublicationResult>;
   createUnavailability: (input: UnavailabilityInput) => Promise<void>; deleteUnavailability: (id: number) => Promise<void>; signIn: () => Promise<void>;
   notifications: PlanningNotification[]; unreadNotificationCount: number; markNotificationRead: (id: number) => Promise<void>;
   publicationCheck: PublicationCheck; checkBeforePublish: () => Promise<PublicationCheck>;
@@ -42,9 +45,10 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const [weekStart, setWeekStart] = useState(initialWeek); const [demoRole, setDemoRole] = useState<PlanningRole>("admin"); const [showOnlyMine, setShowOnlyMine] = useState(false); const [localWeeks, setLocalWeeks] = useState<Record<string, PlanningSnapshot>>({});
   const authQuery = trpc.auth.me.useQuery(undefined, { enabled: isAuthenticated }); const remoteQuery = trpc.planning.myWeek.useQuery({ weekStart }, { enabled: isAuthenticated });
   const notificationsQuery = trpc.planning.notifications.useQuery(undefined, { enabled: isAuthenticated });
+  const weekTemplatesQuery = trpc.planning.listWeekTemplates.useQuery(undefined, { enabled: isAuthenticated && authQuery.data?.role === "admin" });
   const prePublishCheckQuery = trpc.planning.prePublishCheck.useQuery({ weekStart }, { enabled: isAuthenticated && authQuery.data?.role === "admin" });
   const createStaffMutation = trpc.planning.createStaffMember.useMutation(); const updateStaffMutation = trpc.planning.updateStaffMember.useMutation(); const regenerateCodeMutation = trpc.planning.regenerateStaffCode.useMutation(); const setStaffActiveMutation = trpc.planning.setStaffActive.useMutation(); const createShiftMutation = trpc.planning.createShift.useMutation(); const importPlanningExcelMutation = trpc.planning.importPlanningExcel.useMutation(); const updateShiftMutation = trpc.planning.updateShift.useMutation(); const deleteShiftMutation = trpc.planning.deleteShift.useMutation(); const duplicateWeekMutation = trpc.planning.duplicateWeekToNext.useMutation(); const publishWeekMutation = trpc.planning.publishWeek.useMutation();
-  const createUnavailabilityMutation = trpc.planning.createUnavailability.useMutation(); const deleteUnavailabilityMutation = trpc.planning.deleteUnavailability.useMutation(); const markNotificationReadMutation = trpc.planning.markNotificationRead.useMutation();
+  const createUnavailabilityMutation = trpc.planning.createUnavailability.useMutation(); const deleteUnavailabilityMutation = trpc.planning.deleteUnavailability.useMutation(); const markNotificationReadMutation = trpc.planning.markNotificationRead.useMutation(); const saveWeekTemplateMutation = trpc.planning.saveWeekAsTemplate.useMutation(); const renameWeekTemplateMutation = trpc.planning.renameWeekTemplate.useMutation(); const deleteWeekTemplateMutation = trpc.planning.deleteWeekTemplate.useMutation(); const applyWeekTemplateMutation = trpc.planning.applyWeekTemplate.useMutation();
   const isDemo = !isAuthenticated; const role: PlanningRole = isDemo ? demoRole : authQuery.data?.role === "admin" ? "admin" : "employee"; const fallback = localWeeks[weekStart] ?? buildDemoWeek(weekStart); const snapshot = (isAuthenticated ? remoteQuery.data : fallback) ?? fallback;
   const personalId = isDemo ? undefined : authQuery.data?.id;
   const personalMember = useMemo(() => snapshot.members.find((member) => member.id === personalId) ?? (isDemo ? snapshot.members[0] ?? null : null), [isDemo, personalId, snapshot.members]);
@@ -52,6 +56,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const notifications = useMemo<PlanningNotification[]>(() => isDemo || role !== "employee" ? [] : notificationsQuery.data ?? [], [isDemo, notificationsQuery.data, role]);
   const unreadNotificationCount = useMemo(() => notifications.filter((notification) => !notification.readAt).length, [notifications]);
   const publicationCheck = useMemo<PublicationCheck>(() => isDemo || role !== "admin" ? emptyPublicationCheck : prePublishCheckQuery.data ?? emptyPublicationCheck, [isDemo, prePublishCheckQuery.data, role]);
+  const weekTemplates = useMemo<WeekTemplate[]>(() => isDemo || role !== "admin" ? [] : weekTemplatesQuery.data ?? [], [isDemo, role, weekTemplatesQuery.data]);
   const patchLocalWeek = useCallback((updater: (previous: PlanningSnapshot) => PlanningSnapshot) => setLocalWeeks((previous) => ({ ...previous, [weekStart]: updater(previous[weekStart] ?? buildDemoWeek(weekStart)) })), [weekStart]);
   const refetch = useCallback(async () => { if (isAuthenticated) await Promise.all([remoteQuery.refetch(), notificationsQuery.refetch(), authQuery.data?.role === "admin" ? prePublishCheckQuery.refetch() : Promise.resolve(undefined)]); }, [authQuery.data?.role, isAuthenticated, notificationsQuery, prePublishCheckQuery, remoteQuery]);
   const createShift = useCallback(async (input: ShiftInput) => { if (isDemo) { patchLocalWeek((previous) => ({ ...previous, shifts: [...previous.shifts, { ...input, id: -Date.now() }] })); return; } await createShiftMutation.mutateAsync({ ...input, note: input.note ?? undefined, weekStart }); await refetch(); }, [createShiftMutation, isDemo, patchLocalWeek, refetch, weekStart]);
@@ -80,6 +85,28 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
     setWeekStart(result.weekStart);
     return result;
   }, [duplicateWeekMutation, isDemo, localWeeks, snapshot.members, snapshot.shifts, weekStart]);
+  const saveWeekAsTemplate = useCallback(async (name: string): Promise<SaveWeekTemplateResult> => {
+    if (isDemo) throw new Error("Connectez-vous avec un compte administrateur pour enregistrer un modèle.");
+    const result = await saveWeekTemplateMutation.mutateAsync({ weekStart, name });
+    await weekTemplatesQuery.refetch();
+    return result;
+  }, [isDemo, saveWeekTemplateMutation, weekStart, weekTemplatesQuery]);
+  const renameWeekTemplate = useCallback(async (id: number, name: string) => {
+    if (isDemo) throw new Error("Connectez-vous avec un compte administrateur pour modifier un modèle.");
+    await renameWeekTemplateMutation.mutateAsync({ id, name });
+    await weekTemplatesQuery.refetch();
+  }, [isDemo, renameWeekTemplateMutation, weekTemplatesQuery]);
+  const deleteWeekTemplate = useCallback(async (id: number) => {
+    if (isDemo) throw new Error("Connectez-vous avec un compte administrateur pour supprimer un modèle.");
+    await deleteWeekTemplateMutation.mutateAsync({ id });
+    await weekTemplatesQuery.refetch();
+  }, [deleteWeekTemplateMutation, isDemo, weekTemplatesQuery]);
+  const applyWeekTemplate = useCallback(async (id: number): Promise<ApplyWeekTemplateResult> => {
+    if (isDemo) throw new Error("Connectez-vous avec un compte administrateur pour appliquer un modèle.");
+    const result = await applyWeekTemplateMutation.mutateAsync({ id, weekStart });
+    await refetch();
+    return result;
+  }, [applyWeekTemplateMutation, isDemo, refetch, weekStart]);
   const checkBeforePublish = useCallback(async (): Promise<PublicationCheck> => {
     if (isDemo || role !== "admin") return emptyPublicationCheck;
     const result = await prePublishCheckQuery.refetch();
@@ -104,7 +131,7 @@ export function PlanningProvider({ children }: { children: ReactNode }) {
   const signIn = useCallback(async () => { router.push("/login"); }, [router]);
   const login = useCallback(async (code: string) => { await loginWithCode(code); }, [loginWithCode]);
   const logout = useCallback(async () => { await authLogout(); }, [authLogout]);
-  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, importPlanningExcel, updateShift, deleteShift, createStaffMember, updateStaffMember, regenerateStaffCode, setStaffActive, duplicateWeekToNext, publishWeek, createUnavailability, deleteUnavailability, signIn, notifications, unreadNotificationCount, markNotificationRead, publicationCheck, checkBeforePublish, user, login, logout }), [authQuery.isLoading, changeWeek, checkBeforePublish, createShift, createStaffMember, updateStaffMember, regenerateStaffCode, setStaffActive, duplicateWeekToNext, createUnavailability, deleteShift, deleteUnavailability, importPlanningExcel, isAuthenticated, isDemo, login, logout, markNotificationRead, notifications, personalMember, publicationCheck, publishWeek, remoteQuery.isLoading, role, showOnlyMine, signIn, snapshot, switchDemoRole, unreadNotificationCount, updateShift, user, visibleShifts, weekStart]);
+  const value = useMemo<PlanningContextValue>(() => ({ isDemo, role, weekStart, snapshot, loading: isAuthenticated && (remoteQuery.isLoading || authQuery.isLoading), isAdmin: role === "admin", showOnlyMine, personalMember, visibleShifts, setWeekStart, changeWeek, setDemoRole: switchDemoRole, setShowOnlyMine, createShift, importPlanningExcel, updateShift, deleteShift, createStaffMember, updateStaffMember, regenerateStaffCode, setStaffActive, duplicateWeekToNext, weekTemplates, saveWeekAsTemplate, renameWeekTemplate, deleteWeekTemplate, applyWeekTemplate, publishWeek, createUnavailability, deleteUnavailability, signIn, notifications, unreadNotificationCount, markNotificationRead, publicationCheck, checkBeforePublish, user, login, logout }), [applyWeekTemplate, authQuery.isLoading, changeWeek, checkBeforePublish, createShift, createStaffMember, updateStaffMember, regenerateStaffCode, setStaffActive, deleteWeekTemplate, duplicateWeekToNext, createUnavailability, deleteShift, deleteUnavailability, importPlanningExcel, isAuthenticated, isDemo, login, logout, markNotificationRead, notifications, personalMember, publicationCheck, publishWeek, remoteQuery.isLoading, renameWeekTemplate, role, saveWeekAsTemplate, showOnlyMine, signIn, snapshot, switchDemoRole, unreadNotificationCount, updateShift, user, visibleShifts, weekStart, weekTemplates]);
   return <PlanningContext.Provider value={value}>{children}</PlanningContext.Provider>;
 }
 
