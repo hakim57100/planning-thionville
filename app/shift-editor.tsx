@@ -2,6 +2,7 @@ import { IconSymbol } from "@/components/ui/icon-symbol";
 import { ScreenContainer } from "@/components/screen-container";
 import { haptic } from "@/lib/haptics";
 import { formatUnavailabilityPeriod, isUnavailableForShift, isValidShiftTime, toIsoDate } from "@/lib/planning-utils";
+import { buildShiftAssignmentTimes } from "@/lib/shift-assignment-utils";
 import { usePlanning, useWeekDays } from "@/providers/planning-provider";
 import { useLocalSearchParams, useRouter } from "expo-router";
 import { Alert, Pressable, ScrollView, Text, TextInput, View } from "react-native";
@@ -22,7 +23,10 @@ export default function ShiftEditor() {
   const getBlockingUnavailability = (memberId: number) => snapshot.unavailabilities.find((entry) => entry.staffMemberId === memberId && isUnavailableForShift(entry, date, startsAt));
   const save = async () => {
     if (position.trim().length < 2 || !isValidShiftTime(startsAt, endsAt)) { Alert.alert("Informations à corriger", "Renseignez un poste et des horaires valides au format 11:30 — 15:00."); return; }
-    const input = { serviceDate: date, startsAt, endsAt, position: position.trim(), note: note.trim() || null, memberIds };
+    const assignmentTimes = existing
+      ? buildShiftAssignmentTimes(existing, memberIds)
+      : memberIds.map((staffMemberId) => ({ staffMemberId, startsAt, endsAt }));
+    const input = { serviceDate: date, startsAt, endsAt, position: position.trim(), note: note.trim() || null, memberIds, assignmentTimes };
     if (existing) await updateShift(existing.id, input); else await createShift(input);
     haptic.success(); router.back();
   };

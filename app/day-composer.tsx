@@ -3,6 +3,7 @@ import { ScreenContainer } from "@/components/screen-container";
 import { haptic } from "@/lib/haptics";
 import { formatFrenchDate, isValidShiftTime } from "@/lib/planning-utils";
 import type { PlanningShift, ShiftAssignmentTime, Staff } from "@/lib/demo-planning";
+import { buildShiftAssignmentTimes, getShiftAssignmentTime } from "@/lib/shift-assignment-utils";
 import { usePlanning, useWeekDays } from "@/providers/planning-provider";
 import { useRouter } from "expo-router";
 import { createElement, useEffect, useMemo, useState } from "react";
@@ -22,14 +23,7 @@ const SERVICE_TEMPLATES: ServiceTemplate[] = [
 ];
 
 function defaultTimes(shift: PlanningShift, memberIds: number[]) {
-  return memberIds.map((staffMemberId) => {
-    const current = shift.assignmentTimes?.find((assignment) => assignment.staffMemberId === staffMemberId);
-    return {
-      staffMemberId,
-      startsAt: current?.startsAt ?? shift.startsAt,
-      endsAt: current?.endsAt ?? shift.endsAt,
-    };
-  });
+  return buildShiftAssignmentTimes(shift, memberIds);
 }
 
 export default function DayComposerScreen() {
@@ -199,18 +193,33 @@ function ServiceBoard({ template, serviceDate, shift, extraServiceCount, selecte
 function ServiceSlot({ index, staffMemberId, shift, selectedMember, saving, onAssign, onRemove, onSaveTime }: { index: number; staffMemberId: number | null; shift?: PlanningShift; selectedMember: Staff | null; saving: boolean; onAssign: () => void; onRemove: () => void; onSaveTime: (staffMemberId: number, startsAt: string, endsAt: string) => Promise<void> }) {
   const { snapshot } = usePlanning();
   const member = snapshot.members.find((entry) => entry.id === staffMemberId);
-  const time = staffMemberId && shift ? defaultTimes(shift, [staffMemberId])[0] : undefined;
+  const savedTime = staffMemberId && shift ? getShiftAssignmentTime(shift, staffMemberId) : undefined;
+  const [startsAt, setStartsAt] = useState(savedTime?.startsAt ?? shift?.startsAt ?? "");
+  const [endsAt, setEndsAt] = useState(savedTime?.endsAt ?? shift?.endsAt ?? "");
+
+  useEffect(() => {
+    if (!staffMemberId || !shift) return;
+    const next = getShiftAssignmentTime(shift, staffMemberId);
+    setStartsAt(next.startsAt);
+    setEndsAt(next.endsAt);
+  }, [shift?.assignmentTimes, shift?.endsAt, shift?.id, shift?.startsAt, staffMemberId]);
+
+  const saveTime = async (nextStartsAt: string, nextEndsAt: string) => {
+    setStartsAt(nextStartsAt);
+    setEndsAt(nextEndsAt);
+    if (staffMemberId) await onSaveTime(staffMemberId, nextStartsAt, nextEndsAt);
+  };
+
   if (!member || !staffMemberId) {
     const emptySlot = <Pressable disabled={saving} onPress={onAssign} accessibilityRole="button" accessibilityLabel={`Case ${index + 1} vide${selectedMember ? `, affecter ${selectedMember.name}` : ""}`} style={({ pressed }) => ({ opacity: pressed ? 0.72 : saving ? 0.55 : 1 })}><View className="rounded-2xl border-2 border-dashed border-[#B9D9ED] bg-white px-4 py-4 flex-row items-center gap-3"><View className="h-9 w-9 rounded-xl bg-[#E4F1FB] items-center justify-center"><IconSymbol name="plus" size={19} color="#006491" /></View><View className="flex-1"><Text className="font-bold text-foreground">Case {index + 1} · vide</Text><Text className="mt-1 text-xs text-muted">{selectedMember ? `Placer ${selectedMember.name}` : Platform.OS === "web" ? "Glissez un salarié ici ou touchez après sélection." : "Touchez après avoir sélectionné un salarié."}</Text></View></View></Pressable>;
     return Platform.OS === "web" ? createElement("div", { onDragOver: (event: any) => event.preventDefault(), onDrop: (event: any) => { event.preventDefault(); onAssign(); }, style: { display: "block" } }, emptySlot) : <View>{emptySlot}</View>;
   }
-  return <View style={{ borderLeftColor: member.color, borderLeftWidth: 4 }} className="rounded-2xl bg-white border border-border px-4 py-3"><View className="flex-row items-center gap-3"><View style={{ backgroundColor: member.color }} className="h-9 w-9 rounded-xl items-center justify-center"><Text className="text-xs font-bold text-white">{member.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</Text></View><View className="flex-1"><Text className="font-bold text-foreground">{member.name}</Text><Text className="text-xs text-muted">{member.jobTitle}</Text></View><View className="items-end gap-2"><Pressable disabled={saving} onPress={onAssign} accessibilityRole="button" accessibilityLabel={`Remplacer ${member.name}`} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving ? 0.4 : 1 })}><Text className="text-xs font-bold text-primary">Remplacer</Text></Pressable><Pressable disabled={saving} onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Retirer ${member.name}`} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving ? 0.4 : 1 })}><Text className="text-xs font-bold text-error">Retirer</Text></Pressable></View></View><View className="mt-3 flex-row gap-3"><TimeInput label="Début" initialValue={time?.startsAt ?? shift?.startsAt ?? ""} disabled={saving} onSave={(value) => void onSaveTime(staffMemberId, value, time?.endsAt ?? shift?.endsAt ?? "")} /><TimeInput label="Fin" initialValue={time?.endsAt ?? shift?.endsAt ?? ""} disabled={saving} onSave={(value) => void onSaveTime(staffMemberId, time?.startsAt ?? shift?.startsAt ?? "", value)} /></View></View>;
+  return <View style={{ borderLeftColor: member.color, borderLeftWidth: 4 }} className="rounded-2xl bg-white border border-border px-4 py-3"><View className="flex-row items-center gap-3"><View style={{ backgroundColor: member.color }} className="h-9 w-9 rounded-xl items-center justify-center"><Text className="text-xs font-bold text-white">{member.name.split(" ").map((part) => part[0]).join("").slice(0, 2)}</Text></View><View className="flex-1"><Text className="font-bold text-foreground">{member.name}</Text><Text className="text-xs text-muted">{member.jobTitle}</Text></View><View className="items-end gap-2"><Pressable disabled={saving} onPress={onAssign} accessibilityRole="button" accessibilityLabel={`Remplacer ${member.name}`} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving ? 0.4 : 1 })}><Text className="text-xs font-bold text-primary">Remplacer</Text></Pressable><Pressable disabled={saving} onPress={onRemove} accessibilityRole="button" accessibilityLabel={`Retirer ${member.name}`} style={({ pressed }) => ({ opacity: pressed ? 0.6 : saving ? 0.4 : 1 })}><Text className="text-xs font-bold text-error">Retirer</Text></Pressable></View></View><View className="mt-3 flex-row gap-3"><TimeInput label="Début" value={startsAt} disabled={saving} onChangeText={setStartsAt} onSave={() => void saveTime(startsAt, endsAt)} /><TimeInput label="Fin" value={endsAt} disabled={saving} onChangeText={setEndsAt} onSave={() => void saveTime(startsAt, endsAt)} /></View></View>;
 }
 
-function TimeInput({ label, initialValue, disabled, onSave }: { label: string; initialValue: string; disabled: boolean; onSave: (value: string) => void }) {
-  const [value, setValue] = useState(initialValue);
-  useEffect(() => setValue(initialValue), [initialValue]);
-  return <View className="flex-1"><Text className="mb-1 text-[11px] font-bold text-muted">{label}</Text><TextInput value={value} editable={!disabled} onChangeText={setValue} onEndEditing={() => onSave(value)} keyboardType="numbers-and-punctuation" returnKeyType="done" maxLength={5} placeholder="11:30" className="h-10 rounded-xl border border-border bg-surface px-3 text-sm font-bold text-foreground" /></View>;
+function TimeInput({ label, value, disabled, onChangeText, onSave }: { label: string; value: string; disabled: boolean; onChangeText: (value: string) => void; onSave: () => void }) {
+  const commit = () => onSave();
+  return <View className="flex-1"><Text className="mb-1 text-[11px] font-bold text-muted">{label}</Text><TextInput value={value} editable={!disabled} onChangeText={onChangeText} onBlur={Platform.OS === "web" ? commit : undefined} onEndEditing={Platform.OS === "web" ? undefined : commit} keyboardType="numbers-and-punctuation" returnKeyType="done" maxLength={5} placeholder="11:30" className="h-10 rounded-xl border border-border bg-surface px-3 text-sm font-bold text-foreground" /></View>;
 }
 
 function DayChoice({ label, active, onPress }: { label: string; active: boolean; onPress: () => void }) {
