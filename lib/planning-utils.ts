@@ -29,7 +29,12 @@ export function filterShiftsForMember<T extends { memberIds: number[] }>(shifts:
 }
 
 type HoursMember = { id: number; name: string; jobTitle: string; color: string };
-type HoursShift = { startsAt: string; endsAt: string; memberIds: number[] };
+type HoursShift = { startsAt: string; endsAt: string; memberIds: number[]; assignmentTimes?: Array<{ staffMemberId: number; startsAt: string; endsAt: string }> };
+
+function getMemberShiftDurationMinutes(shift: HoursShift, memberId: number) {
+  const assignment = shift.assignmentTimes?.find((entry) => entry.staffMemberId === memberId);
+  return getShiftDurationMinutes(assignment?.startsAt ?? shift.startsAt, assignment?.endsAt ?? shift.endsAt);
+}
 
 export function getShiftDurationMinutes(startsAt: string, endsAt: string) {
   const toMinutes = (value: string) => { const [hours, minutes] = value.split(":").map(Number); return hours * 60 + minutes; };
@@ -47,7 +52,7 @@ export function formatHours(minutes: number) {
 export function summarizeWeeklyHours<TMember extends HoursMember, TShift extends HoursShift>(members: TMember[], shifts: TShift[]) {
   return members.map((member) => {
     const assigned = shifts.filter((shift) => shift.memberIds.includes(member.id));
-    return { member, minutes: assigned.reduce((total, shift) => total + getShiftDurationMinutes(shift.startsAt, shift.endsAt), 0), shiftCount: assigned.length };
+    return { member, minutes: assigned.reduce((total, shift) => total + getMemberShiftDurationMinutes(shift, member.id), 0), shiftCount: assigned.length };
   }).sort((left, right) => right.minutes - left.minutes || left.member.name.localeCompare(right.member.name, "fr"));
 }
 
